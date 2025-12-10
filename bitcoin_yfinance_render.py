@@ -89,11 +89,6 @@ ax3.set_ylim(0, 100)
 ax3.legend()
 ax3.grid(True, alpha=0.3)
 
-# Volume
-ax4 = plt.subplot(4, 1, 4)
-
-# convert index to float timestamps
-dates_num = mdates.date2num(btc.index.to_pydatetime())
 
 # replace NaN volumes
 
