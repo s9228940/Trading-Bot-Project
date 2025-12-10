@@ -96,13 +96,12 @@ ax4 = plt.subplot(4, 1, 4)
 dates_num = mdates.date2num(btc.index.to_pydatetime())
 
 # replace NaN volumes
-volumes = btc['Volume'].fillna(0).astype(float)
 
-bar_width = 0.8
 
-# Draw ONLY the safe version
-ax4.bar(dates_num, volumes, color='steelblue', alpha=0.6)
-ax4.xaxis_date()
+
+ax4 = plt.subplot(4, 1, 4)
+volumes = btc['Volume'].fillna(0).values  # Convert to numpy array
+ax4.bar(range(len(volumes)), volumes, color='steelblue', alpha=0.6)
 ax4.grid(True, alpha=0.3)
 
 plt.tight_layout()
