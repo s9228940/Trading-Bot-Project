@@ -98,10 +98,10 @@ dates_num = mdates.date2num(btc.index.to_pydatetime())
 # replace NaN volumes
 volumes = btc['Volume'].fillna(0).astype(float)
 
-bar_width = 0.6
+bar_width = 0.8
 
 # Draw ONLY the safe version
-ax4.bar(dates_num, volumes, width=bar_width, color='steelblue', alpha=0.6)
+ax4.bar(dates_num, volumes, color='steelblue', alpha=0.6)
 ax4.xaxis_date()
 ax4.grid(True, alpha=0.3)
 
