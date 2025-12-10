@@ -91,24 +91,22 @@ ax3.grid(True, alpha=0.3)
 
 # Volume
 ax4 = plt.subplot(4, 1, 4)
-# --- FIX FOR RENDER MATPLOTLIB ERROR ---
-# convert index to numbers
+
+# convert index to float timestamps
 dates_num = mdates.date2num(btc.index.to_pydatetime())
 
-# replace NaN volumes with 0
-volumes = btc['Volume'].fillna(0)
+# replace NaN volumes
+volumes = btc['Volume'].fillna(0).astype(float)
 
-# set bar width small enough to avoid errors
 bar_width = 0.6
 
-ax4.bar(dates_num, volumes, width=bar_width, alpha=0.6)
+# Draw ONLY the safe version
+ax4.bar(dates_num, volumes, width=bar_width, color='steelblue', alpha=0.6)
 ax4.xaxis_date()
-
-ax4.bar(btc.index, btc['Volume'], color='steelblue', alpha=0.6)
 ax4.grid(True, alpha=0.3)
 
 plt.tight_layout()
-plt.savefig("btc_analysis.png")   # <-- IMPORTANT FOR RENDER
+plt.savefig("btc_analysis.png")
 print("Grafik kaydedildi: btc_analysis.png")
 
 # 4. ANALYSIS OUTPUT
@@ -145,7 +143,6 @@ if last_macd > last_signal:
 else:
     print("  → Düşüş Trendi")
 
-# Trend logic
 ema12 = float(btc['EMA_12'].iloc[-1])
 ema26 = float(btc['EMA_26'].iloc[-1])
 
@@ -158,5 +155,5 @@ else:
 
 print("="*60)
 print("Analiz tamamlandı. Grafik dosyaya kaydedildi.")
-print("\n⚠️  Not: Bu analiz sadece eğitim amaçlıdır.")
+print("\n⚠️ Not: Bu analiz sadece eğitim amaçlıdır.")
 print("    Yatırım kararları için profesyonel danışman kullanın.")
