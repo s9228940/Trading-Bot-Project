@@ -145,3 +145,5 @@ else:
 
 print("="*60)
 print("Analiz tamamlandı. Grafik dosyaya kaydedildi.")
+print("\n⚠️  Not: Bu analiz sadece eğitim amaçlıdır.")
+print("    Yatırım kararları için profesyonel danışman kullanın.")
