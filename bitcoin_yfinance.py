@@ -2,8 +2,6 @@ import yfinance as yf
 from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
-import matplotlib
-matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
@@ -12,8 +10,16 @@ print("Bitcoin verileri indiriliyor...")
 end_date = datetime.now()
 start_date = end_date - timedelta(days=90)  # Daha fazla veri = daha iyi indikatörler
 
-btc = yf.download('BTC-USD', start=start_date, end=end_date, progress=False)
+# auto_adjust=True eklenerek sütun adlarının düzleştirilmesi sağlanır
+btc = yf.download('BTC-USD', start=start_date, end=end_date, progress=False, auto_adjust=True)
 print(f"✓ {len(btc)} günlük veri indirildi\n")
+
+# Fix: Ensure column names are single-level strings
+# This handles cases where yfinance might return MultiIndex columns
+# even with auto_adjust=True, taking the first element of the tuple
+# for columns like ('Close', 'BTC-USD') -> 'Close'
+if isinstance(btc.columns, pd.MultiIndex):
+    btc.columns = [col[0] if isinstance(col, tuple) else col for col in btc.columns]
 
 # 2. TEKNİK İNDİKATÖRLERİN HESAPLANMASI
 
@@ -91,21 +97,20 @@ ax3.legend(loc='upper left')
 ax3.grid(True, alpha=0.3)
 
 # Alt grafik 4: İşlem Hacmi
-# ax4 = plt.subplot(4, 1, 4)
-# ax4.bar(btc.index, btc['Volume'], color='steelblue', alpha=0.6)
-# ax4.set_ylabel('Hacim', fontsize=10)
-# ax4.set_xlabel('Tarih', fontsize=10)
-# ax4.set_title('İşlem Hacmi', fontsize=12)
-# ax4.grid(True, alpha=0.3)
+ax4 = plt.subplot(4, 1, 4)
+ax4.bar(btc.index, btc['Volume'], color='steelblue', alpha=0.6)
+ax4.set_ylabel('Hacim', fontsize=10)
+ax4.set_xlabel('Tarih', fontsize=10)
+ax4.set_title('İşlem Hacmi', fontsize=12)
+ax4.grid(True, alpha=0.3)
 
 # Tarih formatını düzenle
-for ax in [ax1, ax2, ax3]:
+for ax in [ax1, ax2, ax3, ax4]:
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%d-%m-%Y'))
     plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
 
 plt.tight_layout()
-plt.savefig("btc_analysis.png")
-
+plt.show()
 
 # 4. İSTATİSTİKLER VE SİNYALLER
 print("\n" + "="*60)
