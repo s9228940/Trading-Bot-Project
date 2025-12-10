@@ -1,34 +1,29 @@
-# app.py
-from flask import Flask, send_file, render_template_string
+# test.py
+from flask import Flask, send_file
 import matplotlib
-matplotlib.use("Agg")  # Needed for Render (no GUI)
+matplotlib.use("Agg")  # Required for Render
 import matplotlib.pyplot as plt
 import yfinance as yf
-import pandas as pd
-import io
 import datetime as dt
+import io
 
 app = Flask(__name__)
 
 def generate_chart():
-    """Fetches Bitcoin data, generates chart, returns PNG as bytes."""
-    end_date = dt.datetime.now()
-    start_date = end_date - dt.timedelta(days=180)
+    end = dt.datetime.now()
+    start = end - dt.timedelta(days=180)
 
-    data = yf.download("BTC-USD", start=start_date, end=end_date)
+    data = yf.download("BTC-USD", start=start, end=end, progress=False)
 
     if data.empty:
         raise ValueError("No data returned from Yahoo Finance")
 
-    closes = data["Close"]
-
     fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(closes.index, closes.values)
+    ax.plot(data.index, data["Close"], linewidth=1.5)
     ax.set_title("Bitcoin Closing Price (Last 180 Days)")
-    ax.set_ylabel("Price (USD)")
     ax.set_xlabel("Date")
+    ax.set_ylabel("Price (USD)")
 
-    # Save to bytes buffer
     img_bytes = io.BytesIO()
     plt.savefig(img_bytes, format="png", dpi=150, bbox_inches="tight")
     plt.close(fig)
@@ -38,16 +33,12 @@ def generate_chart():
 
 @app.route("/")
 def index():
-    """Main page showing chart + last price."""
-    end_date = dt.datetime.now()
-    data = yf.download("BTC-USD", period="1d")
-
+    data = yf.download("BTC-USD", period="1d", progress=False)
     if data.empty:
-        last_price = "Unavailable"
+        price = "Unavailable"
     else:
-        last_price = float(data["Close"].iloc[-1])
+        price = f"${data['Close'].iloc[-1]:,.2f}"
 
-    # Inline HTML template
     html = f"""
     <html>
     <head>
@@ -55,18 +46,18 @@ def index():
         <style>
             body {{
                 font-family: Arial, sans-serif;
-                margin: 40px;
                 text-align: center;
+                margin: 40px;
             }}
             img {{
+                border: 2px solid #555;
                 margin-top: 20px;
-                border: 2px solid #444;
             }}
         </style>
     </head>
     <body>
-        <h1>Bitcoin Price Dashboard</h1>
-        <h2>Latest Price: ${last_price:,.2f}</h2>
+        <h1>Bitcoin Dashboard</h1>
+        <h2>Latest Price: {price}</h2>
         <img src="/chart" />
     </body>
     </html>
@@ -76,12 +67,11 @@ def index():
 
 @app.route("/chart")
 def chart():
-    """Returns chart PNG."""
     try:
-        img = generate_chart()
-        return send_file(img, mimetype="image/png")
+        image = generate_chart()
+        return send_file(image, mimetype="image/png")
     except Exception as e:
-        return f"Error generating chart: {str(e)}"
+        return f"Error: {str(e)}", 500
 
 
 if __name__ == "__main__":
