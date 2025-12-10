@@ -15,18 +15,18 @@ def generate_chart():
 
    data = yf.download("BTC-USD", period="1d", progress=False)
 
-if data.empty or "Close" not in data.columns:
-    price = "Unavailable"
-else:
-    # Fix: force to float even if it's a Series
-    last_close = data["Close"].iloc[-1]
+    if data.empty or "Close" not in data.columns:
+        price = "Unavailable"
+    else:
+        # Fix: force to float even if it's a Series
+        last_close = data["Close"].iloc[-1]
 
-    # If Yahoo returns a Series (MultiIndex), convert correctly
-    if isinstance(last_close, pd.Series):
-        last_close = last_close.iloc[0]
+        # If Yahoo returns a Series (MultiIndex), convert correctly
+        if isinstance(last_close, pd.Series):
+            last_close = last_close.iloc[0]
 
-    last_close = float(last_close)
-    price = f"${last_close:,.2f}"
+        last_close = float(last_close)
+        price = f"${last_close:,.2f}"
 
 
     if data.empty:
