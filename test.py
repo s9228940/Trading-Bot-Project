@@ -1,33 +1,43 @@
 # test.py
 from flask import Flask, send_file
 import matplotlib
-matplotlib.use("Agg")  # Required for Render
+matplotlib.use("Agg")  # Required for Render (no display server)
 import matplotlib.pyplot as plt
 import yfinance as yf
+import pandas as pd
 import datetime as dt
 import io
 
 app = Flask(__name__)
 
+# ---------------------------------------------------------------------
+# Fetch price safely (handles MultiIndex, Series, empty data)
+# ---------------------------------------------------------------------
+def get_safe_price():
+    data = yf.download("BTC-USD", period="1d", progress=False)
+
+    if data.empty or "Close" not in data.columns:
+        return "Unavailable"
+
+    last_close = data["Close"].iloc[-1]
+
+    # Fix: sometimes Yahoo returns a Series (MultiIndex)
+    if isinstance(last_close, pd.Series):
+        last_close = last_close.iloc[0]
+
+    last_close = float(last_close)
+    return f"${last_close:,.2f}"
+
+
+# ---------------------------------------------------------------------
+# Generate Price Chart
+# ---------------------------------------------------------------------
 def generate_chart():
     end = dt.datetime.now()
     start = end - dt.timedelta(days=180)
 
-   data = yf.download("BTC-USD", period="1d", progress=False)
-
-    if data.empty or "Close" not in data.columns:
-        price = "Unavailable"
-    else:
-        # Fix: force to float even if it's a Series
-        last_close = data["Close"].iloc[-1]
-
-        # If Yahoo returns a Series (MultiIndex), convert correctly
-        if isinstance(last_close, pd.Series):
-            last_close = last_close.iloc[0]
-
-        last_close = float(last_close)
-        price = f"${last_close:,.2f}"
-
+    # Must download 180-day data for chart
+    data = yf.download("BTC-USD", start=start, end=end, progress=False)
 
     if data.empty:
         raise ValueError("No data returned from Yahoo Finance")
@@ -45,13 +55,12 @@ def generate_chart():
     return img_bytes
 
 
+# ---------------------------------------------------------------------
+# Homepage
+# ---------------------------------------------------------------------
 @app.route("/")
 def index():
-    data = yf.download("BTC-USD", period="1d", progress=False)
-    if data.empty:
-        price = "Unavailable"
-    else:
-        price = f"${data['Close'].iloc[-1]:,.2f}"
+    price = get_safe_price()
 
     html = f"""
     <html>
@@ -79,6 +88,9 @@ def index():
     return html
 
 
+# ---------------------------------------------------------------------
+# Chart endpoint
+# ---------------------------------------------------------------------
 @app.route("/chart")
 def chart():
     try:
@@ -88,5 +100,8 @@ def chart():
         return f"Error: {str(e)}", 500
 
 
+# ---------------------------------------------------------------------
+# Run app
+# ---------------------------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000)
