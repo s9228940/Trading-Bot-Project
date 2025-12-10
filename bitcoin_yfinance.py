@@ -99,7 +99,7 @@ ax3.grid(True, alpha=0.3)
 # ax4.grid(True, alpha=0.3)
 
 # Tarih formatını düzenle
-for ax in [ax1, ax2, ax3, ax4]:
+for ax in [ax1, ax2, ax3]:
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%d-%m-%Y'))
     plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
 
