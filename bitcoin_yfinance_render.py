@@ -91,6 +91,19 @@ ax3.grid(True, alpha=0.3)
 
 # Volume
 ax4 = plt.subplot(4, 1, 4)
+# --- FIX FOR RENDER MATPLOTLIB ERROR ---
+# convert index to numbers
+dates_num = mdates.date2num(btc.index.to_pydatetime())
+
+# replace NaN volumes with 0
+volumes = btc['Volume'].fillna(0)
+
+# set bar width small enough to avoid errors
+bar_width = 0.6
+
+ax4.bar(dates_num, volumes, width=bar_width, alpha=0.6)
+ax4.xaxis_date()
+
 ax4.bar(btc.index, btc['Volume'], color='steelblue', alpha=0.6)
 ax4.grid(True, alpha=0.3)
 
