@@ -1,7 +1,6 @@
-# app.py
-from flask import Flask, send_file
+from flask import Flask, send_file, request
 import matplotlib
-matplotlib.use("Agg")  # Required for Render (no GUI)
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import yfinance as yf
@@ -11,108 +10,118 @@ import io
 
 app = Flask(__name__)
 
+# -----------------------------
+# SUPPORTED COINS
+# -----------------------------
+COINS = {
+    "BTC": "Bitcoin",
+    "ETH": "Ethereum",
+    "USDT": "Tether",
+    "USDC": "USD Coin",
+    "BNB": "BNB",
+    "SOL": "Solana",
+    "XRP": "XRP",
+    "ADA": "Cardano",
+    "DOGE": "Dogecoin",
+    "LTC": "Litecoin",
+    "DOT": "Polkadot",
+    "XMR": "Monero",
+    "LINK": "Chainlink",
+    "MATIC": "Polygon",
+}
 
 # -----------------------------
 # DATA + INDICATORS
 # -----------------------------
-def get_btc_data():
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=90)
+def get_crypto_data(symbol):
+    end = datetime.now()
+    start = end - timedelta(days=90)
 
-    btc = yf.download(
-        "BTC-USD",
-        start=start_date,
-        end=end_date,
+    ticker = f"{symbol}-USD"
+    df = yf.download(
+        ticker,
+        start=start,
+        end=end,
         auto_adjust=True,
         progress=False
     )
 
-    if btc.empty:
-        raise ValueError("No BTC data received from Yahoo Finance")
+    if df.empty:
+        raise ValueError("No data returned")
 
-    if isinstance(btc.columns, pd.MultiIndex):
-        btc.columns = [c[0] if isinstance(c, tuple) else c for c in btc.columns]
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = [c[0] for c in df.columns]
 
     # EMA
-    btc["EMA_12"] = btc["Close"].ewm(span=12, adjust=False).mean()
-    btc["EMA_26"] = btc["Close"].ewm(span=26, adjust=False).mean()
-    btc["EMA_50"] = btc["Close"].ewm(span=50, adjust=False).mean()
+    df["EMA_12"] = df["Close"].ewm(span=12).mean()
+    df["EMA_26"] = df["Close"].ewm(span=26).mean()
+    df["EMA_50"] = df["Close"].ewm(span=50).mean()
 
     # MACD
-    ema_fast = btc["Close"].ewm(span=12, adjust=False).mean()
-    ema_slow = btc["Close"].ewm(span=26, adjust=False).mean()
-    btc["MACD"] = ema_fast - ema_slow
-    btc["MACD_Signal"] = btc["MACD"].ewm(span=9, adjust=False).mean()
-    btc["MACD_Hist"] = btc["MACD"] - btc["MACD_Signal"]
+    ema_fast = df["Close"].ewm(span=12).mean()
+    ema_slow = df["Close"].ewm(span=26).mean()
+    df["MACD"] = ema_fast - ema_slow
+    df["MACD_Signal"] = df["MACD"].ewm(span=9).mean()
+    df["MACD_Hist"] = df["MACD"] - df["MACD_Signal"]
 
     # RSI
-    delta = btc["Close"].diff()
-    gain = delta.where(delta > 0, 0).rolling(14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+    delta = df["Close"].diff()
+    gain = delta.clip(lower=0).rolling(14).mean()
+    loss = (-delta.clip(upper=0)).rolling(14).mean()
     rs = gain / loss
-    btc["RSI"] = 100 - (100 / (1 + rs))
+    df["RSI"] = 100 - (100 / (1 + rs))
 
-    return btc
+    return df
 
 
 # -----------------------------
-# CHART GENERATION
+# CHART
 # -----------------------------
-def create_analysis_chart():
-    btc = get_btc_data()
+def create_chart(symbol):
+    df = get_crypto_data(symbol)
+    name = COINS[symbol]
 
     fig = plt.figure(figsize=(15, 12))
-    fig.suptitle("Bitcoin (BTC-USD) Teknik Analiz", fontsize=16, fontweight="bold")
+    fig.suptitle(f"{name} ({symbol}-USD) Technical Analysis", fontsize=16)
 
-    # ---- PRICE + EMA ----
     ax1 = plt.subplot(4, 1, 1)
-    ax1.plot(btc.index, btc["Close"], label="Close", color="black", linewidth=2)
-    ax1.plot(btc.index, btc["EMA_12"], label="EMA 12", color="blue", alpha=0.7)
-    ax1.plot(btc.index, btc["EMA_26"], label="EMA 26", color="red", alpha=0.7)
-    ax1.plot(btc.index, btc["EMA_50"], label="EMA 50", color="green", alpha=0.7)
-    ax1.set_title("Price & Moving Averages")
+    ax1.plot(df.index, df["Close"], label="Close", color="black")
+    ax1.plot(df.index, df["EMA_12"], label="EMA 12")
+    ax1.plot(df.index, df["EMA_26"], label="EMA 26")
+    ax1.plot(df.index, df["EMA_50"], label="EMA 50")
     ax1.legend()
     ax1.grid(alpha=0.3)
 
-    # ---- MACD ----
     ax2 = plt.subplot(4, 1, 2)
-    ax2.plot(btc.index, btc["MACD"], label="MACD", color="blue")
-    ax2.plot(btc.index, btc["MACD_Signal"], label="Signal", color="red")
-    ax2.bar(btc.index, btc["MACD_Hist"], label="Histogram", color="gray", alpha=0.4)
-    ax2.axhline(0, color="black", linestyle="--", linewidth=0.7)
-    ax2.set_title("MACD")
+    ax2.plot(df.index, df["MACD"], label="MACD")
+    ax2.plot(df.index, df["MACD_Signal"], label="Signal")
+    ax2.bar(df.index, df["MACD_Hist"], alpha=0.4)
+    ax2.axhline(0, color="black", linestyle="--")
     ax2.legend()
     ax2.grid(alpha=0.3)
 
-    # ---- RSI ----
     ax3 = plt.subplot(4, 1, 3)
-    ax3.plot(btc.index, btc["RSI"], label="RSI", color="purple", linewidth=2)
-    ax3.axhline(70, color="red", linestyle="--", linewidth=1)
-    ax3.axhline(30, color="green", linestyle="--", linewidth=1)
+    ax3.plot(df.index, df["RSI"], color="purple")
+    ax3.axhline(70, color="red", linestyle="--")
+    ax3.axhline(30, color="green", linestyle="--")
     ax3.set_ylim(0, 100)
-    ax3.fill_between(btc.index, 30, 70, color="gray", alpha=0.1)
-    ax3.set_title("RSI")
     ax3.grid(alpha=0.3)
 
-    # ---- VOLUME ----
     ax4 = plt.subplot(4, 1, 4)
-    ax4.bar(btc.index, btc["Volume"], color="steelblue", alpha=0.6)
-    ax4.set_title("Volume")
+    ax4.bar(df.index, df["Volume"], alpha=0.6)
     ax4.grid(alpha=0.3)
 
-    # Format dates
     for ax in [ax1, ax2, ax3, ax4]:
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%d-%m"))
         plt.setp(ax.xaxis.get_majorticklabels(), rotation=45)
 
     plt.tight_layout()
 
-    # Save to bytes for web usage
-    img_bytes = io.BytesIO()
-    plt.savefig(img_bytes, format="png", bbox_inches="tight", dpi=120)
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png", dpi=120, bbox_inches="tight")
     plt.close(fig)
-    img_bytes.seek(0)
-    return img_bytes
+    buf.seek(0)
+    return buf
 
 
 # -----------------------------
@@ -120,43 +129,48 @@ def create_analysis_chart():
 # -----------------------------
 @app.route("/")
 def home():
-    btc = get_btc_data()
-    last_close = float(btc["Close"].iloc[-1])
-    price = f"${last_close:,.2f}"
+    symbol = request.args.get("coin", "BTC").upper()
+    if symbol not in COINS:
+        symbol = "BTC"
 
-    html = f"""
+    df = get_crypto_data(symbol)
+    price = float(df["Close"].iloc[-1])
+
+    options = "".join(
+        f'<option value="{k}" {"selected" if k==symbol else ""}>{v}</option>'
+        for k, v in COINS.items()
+    )
+
+    return f"""
     <html>
     <head>
-        <title>BTC Technical Dashboard</title>
-        <style>
-            body {{
-                font-family: Arial;
-                text-align: center;
-                margin: 40px;
-            }}
-        </style>
+        <title>Crypto Dashboard</title>
     </head>
-    <body>
-        <h1>Bitcoin Technical Dashboard</h1>
-        <h2>Latest Price: {price}</h2>
-        <img src="/chart" width="900"/>
+    <body style="text-align:center;font-family:Arial;">
+        <h1>{COINS[symbol]} Dashboard</h1>
+        <h2>Price: ${price:,.2f}</h2>
+
+        <form method="get">
+            <select name="coin" onchange="this.form.submit()">
+                {options}
+            </select>
+        </form>
+
+        <img src="/chart?coin={symbol}" width="900"/>
     </body>
     </html>
     """
-    return html
 
 
 @app.route("/chart")
 def chart():
-    try:
-        img = create_analysis_chart()
-        return send_file(img, mimetype="image/png")
-    except Exception as e:
-        return f"Error: {str(e)}", 500
+    symbol = request.args.get("coin", "BTC").upper()
+    if symbol not in COINS:
+        return "Invalid coin", 400
+
+    img = create_chart(symbol)
+    return send_file(img, mimetype="image/png")
 
 
-# -----------------------------
-# RUN
-# -----------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000)
