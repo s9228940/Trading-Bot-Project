@@ -235,7 +235,7 @@ def home():
     
     try:
         df = get_crypto_data(symbol, period)
-        price = df["Close"].iloc[-1]
+        price = float(df["Close"].iloc[-1])
         analysis, confidence = get_ai_analysis(symbol, period, level)
         chart_html = create_plotly_chart(symbol, period)
     except:
