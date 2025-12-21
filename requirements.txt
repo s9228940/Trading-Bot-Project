@@ -1,4 +1,5 @@
 Flask
+Flask-Caching
 matplotlib
 yfinance
 pandas
