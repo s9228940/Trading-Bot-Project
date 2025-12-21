@@ -7,3 +7,6 @@ pandas
 anthropic
 gunicorn
 numpy
+plotly
+redis
+Werkzeug
