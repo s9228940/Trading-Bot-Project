@@ -1,5 +1,7 @@
 from flask import Flask, send_file, request, jsonify
 from flask_caching import Cache
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -10,15 +12,20 @@ from datetime import datetime, timedelta
 import io
 import anthropic
 import os
-from functools import lru_cache
-import hashlib
 
 app = Flask(__name__)
 
 # Configure caching
 app.config['CACHE_TYPE'] = 'simple'
-app.config['CACHE_DEFAULT_TIMEOUT'] = 300  # 5 minutes
+app.config['CACHE_DEFAULT_TIMEOUT'] = 300
 cache = Cache(app)
+
+# Configure rate limiting
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"]
+)
 
 # Get API key from environment variable
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
@@ -46,7 +53,7 @@ COINS = {
 # -----------------------------
 # DATA + INDICATORS (CACHED)
 # -----------------------------
-@cache.memoize(timeout=300)  # Cache for 5 minutes
+@cache.memoize(timeout=300)
 def get_crypto_data(symbol):
     end = datetime.now()
     start = end - timedelta(days=90)
@@ -93,47 +100,126 @@ def get_crypto_data(symbol):
     return df
 
 
+def get_indicator_summary(df):
+    """Get standardized indicator summary with trends"""
+    latest = df.iloc[-1]
+    prev_5d = df.iloc[-6] if len(df) > 5 else df.iloc[0]
+    
+    return {
+        'price': latest['Close'],
+        'rsi': latest['RSI'],
+        'rsi_5d_change': latest['RSI'] - prev_5d['RSI'],
+        'macd': latest['MACD'],
+        'macd_signal': latest['MACD_Signal'],
+        'macd_hist': latest['MACD_Hist'],
+        'macd_hist_5d_change': latest['MACD_Hist'] - prev_5d['MACD_Hist'],
+        'ema_12': latest['EMA_12'],
+        'ema_26': latest['EMA_26'],
+        'ema_50': latest['EMA_50'],
+        'price_vs_ema50_pct': ((latest['Close'] - latest['EMA_50']) / latest['EMA_50']) * 100,
+        'volume': latest['Volume']
+    }
+
+
+def calculate_confidence(indicators):
+    """Calculate confidence level based on indicator alignment"""
+    confidence_score = 0
+    
+    # RSI confidence (distance from neutral 50)
+    rsi_distance = abs(indicators['rsi'] - 50)
+    if rsi_distance > 30:
+        confidence_score += 3
+    elif rsi_distance > 15:
+        confidence_score += 2
+    else:
+        confidence_score += 1
+    
+    # EMA alignment
+    price = indicators['price']
+    if (price > indicators['ema_12'] > indicators['ema_26'] > indicators['ema_50']) or \
+       (price < indicators['ema_12'] < indicators['ema_26'] < indicators['ema_50']):
+        confidence_score += 3
+    elif (price > indicators['ema_50']) or (price < indicators['ema_50']):
+        confidence_score += 2
+    else:
+        confidence_score += 1
+    
+    # MACD histogram magnitude
+    if abs(indicators['macd_hist']) > abs(indicators['macd']) * 0.1:
+        confidence_score += 2
+    else:
+        confidence_score += 1
+    
+    # Map to labels
+    if confidence_score >= 7:
+        return "High"
+    elif confidence_score >= 5:
+        return "Medium"
+    else:
+        return "Low"
+
+
 # -----------------------------
 # CHART (CACHED)
 # -----------------------------
-@cache.memoize(timeout=300)  # Cache for 5 minutes
+@cache.memoize(timeout=300)
 def create_chart(symbol):
     df = get_crypto_data(symbol)
     name = COINS[symbol]
+    indicators = get_indicator_summary(df)
 
     fig = plt.figure(figsize=(15, 12))
-    fig.suptitle(f"{name} ({symbol}-USD) Technical Analysis", fontsize=16)
+    fig.suptitle(f"{name} ({symbol}-USD) Technical Analysis", fontsize=16, fontweight='bold')
 
     ax1 = plt.subplot(4, 1, 1)
-    ax1.plot(df.index, df["Close"], label="Close", color="black")
+    ax1.plot(df.index, df["Close"], label="Close", color="black", linewidth=2)
     ax1.plot(df.index, df["EMA_12"], label="EMA 12", alpha=0.7)
     ax1.plot(df.index, df["EMA_26"], label="EMA 26", alpha=0.7)
     ax1.plot(df.index, df["EMA_50"], label="EMA 50", alpha=0.7)
-    ax1.set_ylabel("Price (USD)")
-    ax1.legend()
+    
+    # Add trend annotation
+    if indicators['price'] > indicators['ema_50']:
+        trend_text = "Short-term: Bullish"
+        trend_color = "green"
+    else:
+        trend_text = "Short-term: Bearish"
+        trend_color = "red"
+    ax1.text(0.02, 0.95, trend_text, transform=ax1.transAxes, 
+             fontsize=10, verticalalignment='top', 
+             bbox=dict(boxstyle='round', facecolor=trend_color, alpha=0.3))
+    
+    ax1.set_ylabel("Price (USD)", fontweight='bold')
+    ax1.legend(loc='upper left')
     ax1.grid(alpha=0.3)
 
     ax2 = plt.subplot(4, 1, 2)
-    ax2.plot(df.index, df["MACD"], label="MACD")
-    ax2.plot(df.index, df["MACD_Signal"], label="Signal")
-    ax2.bar(df.index, df["MACD_Hist"], alpha=0.4, label="Histogram")
-    ax2.axhline(0, color="black", linestyle="--")
-    ax2.set_ylabel("MACD")
-    ax2.legend()
+    ax2.plot(df.index, df["MACD"], label="MACD", linewidth=2)
+    ax2.plot(df.index, df["MACD_Signal"], label="Signal", linewidth=2)
+    colors = ['green' if x > 0 else 'red' for x in df["MACD_Hist"]]
+    ax2.bar(df.index, df["MACD_Hist"], alpha=0.4, color=colors, label="Histogram")
+    ax2.axhline(0, color="black", linestyle="--", linewidth=1)
+    ax2.set_ylabel("MACD", fontweight='bold')
+    ax2.legend(loc='upper left')
     ax2.grid(alpha=0.3)
 
     ax3 = plt.subplot(4, 1, 3)
-    ax3.plot(df.index, df["RSI"], color="purple", label="RSI")
-    ax3.axhline(70, color="red", linestyle="--", alpha=0.5, label="Overbought")
-    ax3.axhline(30, color="green", linestyle="--", alpha=0.5, label="Oversold")
+    ax3.plot(df.index, df["RSI"], color="purple", linewidth=2, label="RSI")
+    
+    # Highlight overbought/oversold zones
+    ax3.axhspan(70, 100, alpha=0.2, color='red', label='Overbought Zone')
+    ax3.axhspan(0, 30, alpha=0.2, color='green', label='Oversold Zone')
+    ax3.axhline(70, color="red", linestyle="--", linewidth=1)
+    ax3.axhline(30, color="green", linestyle="--", linewidth=1)
+    ax3.axhline(50, color="gray", linestyle=":", linewidth=1, alpha=0.5)
+    
     ax3.set_ylim(0, 100)
-    ax3.set_ylabel("RSI")
-    ax3.legend()
+    ax3.set_ylabel("RSI", fontweight='bold')
+    ax3.legend(loc='upper left')
     ax3.grid(alpha=0.3)
 
     ax4 = plt.subplot(4, 1, 4)
     ax4.bar(df.index, df["Volume"], alpha=0.6, color="blue")
-    ax4.set_ylabel("Volume")
+    ax4.set_ylabel("Volume", fontweight='bold')
     ax4.grid(alpha=0.3)
 
     for ax in [ax1, ax2, ax3, ax4]:
@@ -146,75 +232,69 @@ def create_chart(symbol):
     plt.savefig(buf, format="png", dpi=120, bbox_inches="tight")
     plt.close(fig)
     buf.seek(0)
-    return buf.read(), df  # Return bytes instead of BytesIO
+    return buf.read(), df
 
 
 # -----------------------------
 # AI ANALYSIS (CACHED)
 # -----------------------------
-@cache.memoize(timeout=600)  # Cache for 10 minutes (AI responses change less)
+@cache.memoize(timeout=600)
 def get_ai_analysis(symbol, interpretation_level='advanced'):
-    """Get AI analysis of the technical indicators"""
+    """Get AI analysis with timeout and confidence"""
     if not ANTHROPIC_API_KEY:
-        return "AI analysis unavailable: API key not configured. Please set ANTHROPIC_API_KEY environment variable."
+        return "AI analysis unavailable: API key not configured.", "N/A"
     
     try:
         df = get_crypto_data(symbol)
-        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        indicators = get_indicator_summary(df)
+        confidence = calculate_confidence(indicators)
         
-        # Get latest values
-        latest = df.iloc[-1]
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=15.0)
+        
         prev = df.iloc[-2]
+        price_change = ((indicators['price'] - prev["Close"]) / prev["Close"]) * 100
         
-        # Calculate trends
-        price_change = ((latest["Close"] - prev["Close"]) / prev["Close"]) * 100
-        
-        prompt_template = """Analyze this cryptocurrency technical data for {name} ({symbol}):
+        prompt_base = f"""Analyze this cryptocurrency technical data for {COINS[symbol]} ({symbol}):
 
-Current Price: ${current_price:.2f}
-24h Change: {price_change:.2f}%
+Current Price: ${indicators['price']:.2f} (24h change: {price_change:+.2f}%)
 
-Technical Indicators:
-- EMA 12: ${ema_12:.2f}
-- EMA 26: ${ema_26:.2f}
-- EMA 50: ${ema_50:.2f}
-- MACD: {macd:.4f}
-- MACD Signal: {macd_signal:.4f}
-- MACD Histogram: {macd_hist:.4f}
-- RSI: {rsi:.2f}
+Technical Indicators & Trends:
+- RSI: {indicators['rsi']:.2f} (5-day change: {indicators['rsi_5d_change']:+.2f})
+- MACD: {indicators['macd']:.4f}
+- MACD Signal: {indicators['macd_signal']:.4f}
+- MACD Histogram: {indicators['macd_hist']:.4f} (5-day change: {indicators['macd_hist_5d_change']:+.4f})
+- Price vs EMA-50: {indicators['price_vs_ema50_pct']:+.2f}%
+- EMA Alignment: 12=${indicators['ema_12']:.2f}, 26=${indicators['ema_26']:.2f}, 50=${indicators['ema_50']:.2f}
 
 """
 
         if interpretation_level == 'beginner':
-            prompt_template += "Provide a very simple and brief explanation (2-3 sentences) of the current market sentiment based on the indicators, suitable for a beginner. Explain what RSI and MACD are in simple terms. Avoid complex jargon and focus on a clear bullish/bearish/neutral outlook."
-        else:  # Default to advanced
-            prompt_template += "Provide a brief technical analysis (3-4 sentences) covering:\n1. Overall trend (bullish/bearish/neutral)\n2. What the indicators suggest\n3. Key support/resistance levels if relevant\nKeep it concise and actionable."
+            prompt_base += """Provide a simple explanation (2-3 sentences) of what these indicators mean in plain English. 
+Focus on whether the market sentiment appears positive, negative, or neutral. Avoid jargon.
 
-        prompt = prompt_template.format(
-            name=COINS[symbol],
-            symbol=symbol,
-            current_price=latest['Close'],
-            price_change=price_change,
-            ema_12=latest['EMA_12'],
-            ema_26=latest['EMA_26'],
-            ema_50=latest['EMA_50'],
-            macd=latest['MACD'],
-            macd_signal=latest['MACD_Signal'],
-            macd_hist=latest['MACD_Hist'],
-            rsi=latest['RSI']
-        )
+IMPORTANT: This is educational analysis only, not financial advice. Do not use words like "buy", "sell", or "target price"."""
+        else:
+            prompt_base += """Provide a technical analysis (3-4 sentences) covering:
+1. Overall trend based on indicator alignment
+2. Momentum signals from RSI and MACD trends
+3. Key observations from the 5-day changes
+
+IMPORTANT: This is educational analysis only, not financial advice. Focus on interpretation, not trading recommendations."""
 
         message = client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=1000,
-            messages=[
-                {"role": "user", "content": prompt}
-            ]
+            messages=[{"role": "user", "content": prompt_base}]
         )
         
-        return message.content[0].text
+        analysis = message.content[0].text
+        return analysis, confidence
+        
+    except anthropic.TimeoutError:
+        return "AI analysis temporarily unavailable (timeout). Please try again.", "N/A"
     except Exception as e:
-        return f"Analysis unavailable: {str(e)}"
+        print(f"AI Error: {e}")
+        return "AI analysis temporarily unavailable. Please try again.", "N/A"
 
 
 # -----------------------------
@@ -231,155 +311,323 @@ def home():
     df = get_crypto_data(symbol)
     price = float(df["Close"].iloc[-1])
     
-    # Get AI analysis (now cached)
-    analysis = get_ai_analysis(symbol, interpretation_level)
+    analysis, confidence = get_ai_analysis(symbol, interpretation_level)
 
     options = "".join(
         f'<option value="{k}" {"selected" if k==symbol else ""}>{v}</option>'
         for k, v in COINS.items()
     )
 
-    interpretation_options = [
-        {'value': 'beginner', 'label': 'Beginner'},
-        {'value': 'advanced', 'label': 'Advanced'}
+    interpretation_select = f"""
+        <option value="beginner" {"selected" if interpretation_level=="beginner" else ""}>Beginner</option>
+        <option value="advanced" {"selected" if interpretation_level=="advanced" else ""}>Advanced</option>
+    """
+
+    example_questions = [
+        "What does MACD mean?",
+        "Is momentum strengthening?",
+        "Is RSI signaling overbought conditions?",
+        "What do the EMAs suggest?",
+        "Should I be concerned about the current RSI?"
     ]
 
-    interpretation_select = "".join(
-        f'<option value="{opt["value"]}" {"selected" if opt["value"]==interpretation_level else ""}>{opt["label"]}</option>'
-        for opt in interpretation_options
-    )
+    example_buttons = "".join([
+        f'<button class="example-btn" onclick="document.getElementById(\'ai-question\').value=\'{q}\'; askAI();">{q}</button>'
+        for q in example_questions
+    ])
 
     return f"""
-    <html>
+    <!DOCTYPE html>
+    <html lang="en">
     <head>
-        <title>Crypto Dashboard</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>{COINS[symbol]} Crypto Dashboard</title>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
         <style>
-            body {{
-                text-align: center;
-                font-family: Arial, sans-serif;
-                background: #f5f5f5;
+            * {{
                 margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }}
+            
+            body {{
+                font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
                 padding: 20px;
             }}
+            
+            .header {{
+                text-align: center;
+                color: white;
+                margin-bottom: 30px;
+            }}
+            
+            .header h1 {{
+                font-size: 2.5rem;
+                font-weight: 700;
+                margin-bottom: 10px;
+                text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+            }}
+            
+            .price-display {{
+                font-size: 2rem;
+                font-weight: 600;
+                color: #4ade80;
+                text-shadow: 1px 1px 2px rgba(0,0,0,0.2);
+            }}
+            
             .container {{
-                max-width: 1200px;
+                max-width: 1400px;
                 margin: 0 auto;
                 background: white;
-                padding: 30px;
-                border-radius: 10px;
-                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                border-radius: 20px;
+                padding: 40px;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
             }}
-            h1 {{
-                color: #333;
-                margin-bottom: 10px;
-            }}
-            h2 {{
-                color: #4CAF50;
-                margin-top: 5px;
-            }}
-            select {{
-                padding: 10px 20px;
-                font-size: 16px;
-                border: 2px solid #4CAF50;
-                border-radius: 5px;
-                background: white;
-                cursor: pointer;
-                margin: 10px 5px;
-            }}
-            select:hover {{
-                background: #f0f0f0;
-            }}
-            label {{
-                font-weight: bold;
-                margin-right: 5px;
-            }}
-            .analysis-box {{
-                background: #e8f5e9;
-                border-left: 4px solid #4CAF50;
-                padding: 20px;
-                margin: 20px 0;
-                text-align: left;
-                border-radius: 5px;
-            }}
-            .analysis-box h3 {{
-                margin-top: 0;
-                color: #2E7D32;
-            }}
-            .analysis-box p {{
-                color: #333;
-                line-height: 1.6;
-            }}
-            .question-box {{
-                background: #e3f2fd;
-                border-left: 4px solid #2196F3;
-                padding: 20px;
-                margin: 20px 0;
-                text-align: left;
-                border-radius: 5px;
-            }}
-            .question-box h3 {{
-                margin-top: 0;
-                color: #1565C0;
-            }}
-            .question-input {{
-                width: calc(100% - 120px);
-                padding: 12px;
-                font-size: 16px;
-                border: 2px solid #2196F3;
-                border-radius: 5px;
-                margin-right: 10px;
-            }}
-            .ask-button {{
-                padding: 12px 30px;
-                font-size: 16px;
-                background: #2196F3;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                cursor: pointer;
-                font-weight: bold;
-            }}
-            .ask-button:hover {{
-                background: #1976D2;
-            }}
-            .ask-button:disabled {{
-                background: #ccc;
-                cursor: not-allowed;
-            }}
-            .answer-box {{
-                background: #fff;
-                border: 1px solid #2196F3;
-                padding: 15px;
-                margin-top: 15px;
-                border-radius: 5px;
-                text-align: left;
-                display: none;
-            }}
-            .answer-box.show {{
-                display: block;
-            }}
-            .loading {{
-                color: #666;
-                font-style: italic;
-            }}
-            img {{
-                max-width: 100%;
-                height: auto;
-                margin-top: 20px;
-                border-radius: 5px;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            }}
+            
             .controls {{
                 display: flex;
                 justify-content: center;
-                align-items: center;
-                gap: 20px;
-                margin-bottom: 20px;
+                gap: 30px;
+                margin-bottom: 30px;
                 flex-wrap: wrap;
             }}
+            
             .control-group {{
                 display: flex;
+                flex-direction: column;
+                gap: 8px;
+            }}
+            
+            .control-group label {{
+                font-weight: 600;
+                color: #374151;
+                font-size: 0.9rem;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }}
+            
+            select {{
+                padding: 12px 20px;
+                font-size: 16px;
+                border: 2px solid #e5e7eb;
+                border-radius: 10px;
+                background: white;
+                cursor: pointer;
+                font-weight: 500;
+                transition: all 0.3s;
+            }}
+            
+            select:hover {{
+                border-color: #667eea;
+            }}
+            
+            select:focus {{
+                outline: none;
+                border-color: #667eea;
+                box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            }}
+            
+            .info-card {{
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 25px;
+                border-radius: 15px;
+                margin-bottom: 25px;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            }}
+            
+            .info-card h3 {{
+                font-size: 1.3rem;
+                margin-bottom: 15px;
+                display: flex;
                 align-items: center;
+                gap: 10px;
+            }}
+            
+            .confidence-badge {{
+                display: inline-block;
+                padding: 6px 16px;
+                border-radius: 20px;
+                font-size: 0.85rem;
+                font-weight: 600;
+                background: rgba(255,255,255,0.2);
+                backdrop-filter: blur(10px);
+            }}
+            
+            .info-card p {{
+                line-height: 1.8;
+                font-size: 1.05rem;
+            }}
+            
+            .question-card {{
+                background: #f9fafb;
+                border: 2px solid #e5e7eb;
+                padding: 25px;
+                border-radius: 15px;
+                margin-bottom: 25px;
+            }}
+            
+            .question-card h3 {{
+                color: #1f2937;
+                font-size: 1.3rem;
+                margin-bottom: 10px;
+            }}
+            
+            .question-card .subtitle {{
+                color: #6b7280;
+                margin-bottom: 20px;
+            }}
+            
+            .input-group {{
+                display: flex;
+                gap: 10px;
+                margin-bottom: 15px;
+            }}
+            
+            .question-input {{
+                flex: 1;
+                padding: 14px 18px;
+                font-size: 16px;
+                border: 2px solid #e5e7eb;
+                border-radius: 10px;
+                font-family: inherit;
+                transition: all 0.3s;
+            }}
+            
+            .question-input:focus {{
+                outline: none;
+                border-color: #667eea;
+                box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            }}
+            
+            .ask-button {{
+                padding: 14px 35px;
+                font-size: 16px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                border: none;
+                border-radius: 10px;
+                cursor: pointer;
+                font-weight: 600;
+                transition: all 0.3s;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            }}
+            
+            .ask-button:hover {{
+                transform: translateY(-2px);
+                box-shadow: 0 6px 12px rgba(0,0,0,0.15);
+            }}
+            
+            .ask-button:disabled {{
+                background: #9ca3af;
+                cursor: not-allowed;
+                transform: none;
+            }}
+            
+            .example-questions {{
+                display: flex;
+                flex-wrap: wrap;
+                gap: 10px;
+                margin-bottom: 15px;
+            }}
+            
+            .example-btn {{
+                padding: 8px 16px;
+                background: white;
+                border: 2px solid #e5e7eb;
+                border-radius: 20px;
+                cursor: pointer;
+                font-size: 0.9rem;
+                transition: all 0.3s;
+                font-family: inherit;
+            }}
+            
+            .example-btn:hover {{
+                background: #667eea;
+                color: white;
+                border-color: #667eea;
+            }}
+            
+            .answer-box {{
+                background: white;
+                border: 2px solid #667eea;
+                padding: 20px;
+                border-radius: 10px;
+                margin-top: 15px;
+                display: none;
+            }}
+            
+            .answer-box.show {{
+                display: block;
+                animation: slideIn 0.3s ease;
+            }}
+            
+            @keyframes slideIn {{
+                from {{
+                    opacity: 0;
+                    transform: translateY(-10px);
+                }}
+                to {{
+                    opacity: 1;
+                    transform: translateY(0);
+                }}
+            }}
+            
+            .loading {{
+                color: #667eea;
+                font-style: italic;
+            }}
+            
+            .chart-container {{
+                margin-top: 30px;
+                border-radius: 15px;
+                overflow: hidden;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            }}
+            
+            .chart-container img {{
+                width: 100%;
+                height: auto;
+                display: block;
+            }}
+            
+            .disclaimer {{
+                background: #fef3c7;
+                border-left: 4px solid #f59e0b;
+                padding: 15px 20px;
+                border-radius: 10px;
+                margin-top: 20px;
+                font-size: 0.9rem;
+                color: #92400e;
+            }}
+            
+            .tooltip {{
+                position: relative;
+                display: inline-block;
+                cursor: help;
+                color: #667eea;
+            }}
+            
+            @media (max-width: 768px) {{
+                .header h1 {{
+                    font-size: 1.8rem;
+                }}
+                .price-display {{
+                    font-size: 1.5rem;
+                }}
+                .container {{
+                    padding: 20px;
+                }}
+                .controls {{
+                    flex-direction: column;
+                    gap: 15px;
+                }}
+                .input-group {{
+                    flex-direction: column;
+                }}
             }}
         </style>
         <script>
@@ -394,7 +642,6 @@ def home():
                     return;
                 }}
                 
-                // Show loading state
                 askButton.disabled = true;
                 answerBox.classList.add('show');
                 answerText.innerHTML = '<span class="loading">🤔 Thinking...</span>';
@@ -402,48 +649,42 @@ def home():
                 try {{
                     const response = await fetch('/api/ask', {{
                         method: 'POST',
-                        headers: {{
-                            'Content-Type': 'application/json',
-                        }},
-                        body: JSON.stringify({{
-                            question: question,
-                            symbol: '{symbol}'
-                        }})
+                        headers: {{'Content-Type': 'application/json'}},
+                        body: JSON.stringify({{question: question, symbol: '{symbol}'}})
                     }});
                     
                     const data = await response.json();
                     
                     if (data.error) {{
-                        answerText.innerHTML = '<strong style="color: #d32f2f;">Error:</strong> ' + data.error;
+                        answerText.innerHTML = '<strong style="color: #dc2626;">Error:</strong> ' + data.error;
                     }} else {{
                         answerText.innerHTML = '<strong>Answer:</strong> ' + data.answer;
                     }}
                 }} catch (error) {{
-                    answerText.innerHTML = '<strong style="color: #d32f2f;">Error:</strong> Failed to get answer. Please try again.';
+                    answerText.innerHTML = '<strong style="color: #dc2626;">Error:</strong> Failed to get answer. Please try again.';
                 }} finally {{
                     askButton.disabled = false;
                 }}
             }}
             
-            // Allow Enter key to submit
             document.addEventListener('DOMContentLoaded', function() {{
                 document.getElementById('ai-question').addEventListener('keypress', function(e) {{
-                    if (e.key === 'Enter') {{
-                        askAI();
-                    }}
+                    if (e.key === 'Enter') askAI();
                 }});
             }});
         </script>
     </head>
     <body>
+        <div class="header">
+            <h1>📈 {COINS[symbol]} Dashboard</h1>
+            <div class="price-display">${price:,.2f} USD</div>
+        </div>
+        
         <div class="container">
-            <h1>{COINS[symbol]} Dashboard</h1>
-            <h2>Current Price: ${price:,.2f}</h2>
-
             <div class="controls">
                 <div class="control-group">
-                    <form method="get" style="display: inline-block;">
-                        <label for="coin">Cryptocurrency:</label>
+                    <label for="coin">Cryptocurrency</label>
+                    <form method="get" style="margin: 0;">
                         <select name="coin" id="coin" onchange="this.form.submit()">
                             {options}
                         </select>
@@ -451,8 +692,8 @@ def home():
                     </form>
                 </div>
                 <div class="control-group">
-                    <form method="get" style="display: inline-block;">
-                        <label for="interpretation_level">Analysis Level:</label>
+                    <label for="interpretation_level">Analysis Level</label>
+                    <form method="get" style="margin: 0;">
                         <select name="interpretation_level" id="interpretation_level" onchange="this.form.submit()">
                             {interpretation_select}
                         </select>
@@ -461,29 +702,45 @@ def home():
                 </div>
             </div>
 
-            <div class="analysis-box">
-                <h3>🤖 AI Technical Analysis ({interpretation_level.capitalize()})</h3>
+            <div class="info-card">
+                <h3>
+                    🤖 AI Technical Analysis
+                    <span class="confidence-badge">Confidence: {confidence}</span>
+                </h3>
                 <p>{analysis}</p>
             </div>
 
-            <div class="question-box">
+            <div class="question-card">
                 <h3>💬 Ask AI Questions</h3>
-                <p style="margin-bottom: 15px; color: #666;">Ask about technical indicators (MACD, RSI, EMA), trading strategies, or anything about the charts!</p>
-                <div style="display: flex; align-items: center;">
+                <p class="subtitle">Get instant explanations about technical indicators and chart patterns</p>
+                
+                <div class="example-questions">
+                    <small style="width: 100%; display: block; margin-bottom: 8px; color: #6b7280; font-weight: 600;">Quick questions:</small>
+                    {example_buttons}
+                </div>
+                
+                <div class="input-group">
                     <input 
                         type="text" 
                         id="ai-question" 
                         class="question-input" 
-                        placeholder="e.g., What does MACD mean? or Is this a good time to buy?"
+                        placeholder="Type your question here..."
                     />
-                    <button id="ask-button" class="ask-button" onclick="askAI()">Ask</button>
+                    <button id="ask-button" class="ask-button" onclick="askAI()">Ask AI</button>
                 </div>
+                
                 <div id="answer-box" class="answer-box">
                     <div id="answer-text"></div>
                 </div>
             </div>
 
-            <img src="/chart?coin={symbol}" width="100%"/>
+            <div class="chart-container">
+                <img src="/chart?coin={symbol}" alt="{COINS[symbol]} Technical Analysis Chart"/>
+            </div>
+
+            <div class="disclaimer">
+                <strong>⚠️ Educational Purpose Only:</strong> This analysis is for educational purposes only and does not constitute financial advice. Cryptocurrency trading carries significant risk. Always do your own research and consult with a financial advisor before making investment decisions.
+            </div>
         </div>
     </body>
     </html>
@@ -506,7 +763,6 @@ def chart():
 
 @app.route("/api/analysis")
 def api_analysis():
-    """API endpoint for getting just the analysis"""
     symbol = request.args.get("coin", "BTC").upper()
     if symbol not in COINS:
         return jsonify({"error": "Invalid coin"}), 400
@@ -514,19 +770,20 @@ def api_analysis():
     interpretation_level = request.args.get('interpretation_level', 'advanced')
     
     df = get_crypto_data(symbol)
-    analysis = get_ai_analysis(symbol, interpretation_level)
+    analysis, confidence = get_ai_analysis(symbol, interpretation_level)
     
     return jsonify({
         "symbol": symbol,
         "name": COINS[symbol],
         "analysis": analysis,
+        "confidence": confidence,
         "interpretation_level": interpretation_level
     })
 
 
 @app.route("/api/ask", methods=["POST"])
+@limiter.limit("10 per minute")
 def ask_ai():
-    """API endpoint for asking AI questions"""
     if not ANTHROPIC_API_KEY:
         return jsonify({"error": "API key not configured"}), 500
     
@@ -538,32 +795,32 @@ def ask_ai():
         if not question:
             return jsonify({"error": "Question is required"}), 400
         
-        # Get current data for context
         df = get_crypto_data(symbol)
-        latest = df.iloc[-1]
+        indicators = get_indicator_summary(df)
         
-        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=10.0)
         
-        prompt = f"""You are a helpful cryptocurrency trading assistant. The user is looking at technical analysis charts for {COINS[symbol]} ({symbol}).
+        prompt = f"""You are a helpful cryptocurrency education assistant. The user is viewing {COINS[symbol]} ({symbol}) technical charts.
 
-Current context:
-- Price: ${latest['Close']:.2f}
-- RSI: {latest['RSI']:.2f}
-- MACD: {latest['MACD']:.4f}
-- EMA 12: ${latest['EMA_12']:.2f}
-- EMA 26: ${latest['EMA_26']:.2f}
-- EMA 50: ${latest['EMA_50']:.2f}
+Current market context:
+- Price: ${indicators['price']:.2f}
+- RSI: {indicators['rsi']:.2f} (5-day change: {indicators['rsi_5d_change']:+.2f})
+- MACD Histogram: {indicators['macd_hist']:.4f}
+- Price vs EMA-50: {indicators['price_vs_ema50_pct']:+.2f}%
 
 User question: {question}
 
-Provide a clear, concise answer (2-4 sentences). If they're asking about a technical indicator, explain what it means and how to interpret it in the context of {COINS[symbol]}'s current data."""
+Provide a clear, educational answer (2-4 sentences). When explaining indicators:
+- Reference the current chart values
+- Use phrases like "On the RSI panel..." or "Looking at the price chart..."
+- Explain concepts in context
+
+IMPORTANT: This is educational only. Avoid trading recommendations. Do not use "buy", "sell", or "target" language."""
 
         message = client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=500,
-            messages=[
-                {"role": "user", "content": prompt}
-            ]
+            messages=[{"role": "user", "content": prompt}]
         )
         
         return jsonify({
@@ -571,11 +828,12 @@ Provide a clear, concise answer (2-4 sentences). If they're asking about a techn
             "question": question
         })
         
+    except anthropic.TimeoutError:
+        return jsonify({"error": "Request timed out. Please try again."}), 504
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        print(f"Ask AI Error: {e}")
+        return jsonify({"error": "Failed to process question. Please try again."}), 500
 
 
 if __name__ == "__main__":
-    # This is only for local development
-    # Gunicorn doesn't use this block
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8000)), debug=False)
