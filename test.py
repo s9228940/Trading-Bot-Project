@@ -1,4 +1,5 @@
 from flask import Flask, send_file, request, jsonify
+from flask_caching import Cache
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -9,8 +10,15 @@ from datetime import datetime, timedelta
 import io
 import anthropic
 import os
+from functools import lru_cache
+import hashlib
 
 app = Flask(__name__)
+
+# Configure caching
+app.config['CACHE_TYPE'] = 'simple'
+app.config['CACHE_DEFAULT_TIMEOUT'] = 300  # 5 minutes
+cache = Cache(app)
 
 # Get API key from environment variable
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
@@ -36,8 +44,9 @@ COINS = {
 }
 
 # -----------------------------
-# DATA + INDICATORS
+# DATA + INDICATORS (CACHED)
 # -----------------------------
+@cache.memoize(timeout=300)  # Cache for 5 minutes
 def get_crypto_data(symbol):
     end = datetime.now()
     start = end - timedelta(days=90)
@@ -85,8 +94,9 @@ def get_crypto_data(symbol):
 
 
 # -----------------------------
-# CHART
+# CHART (CACHED)
 # -----------------------------
+@cache.memoize(timeout=300)  # Cache for 5 minutes
 def create_chart(symbol):
     df = get_crypto_data(symbol)
     name = COINS[symbol]
@@ -136,18 +146,20 @@ def create_chart(symbol):
     plt.savefig(buf, format="png", dpi=120, bbox_inches="tight")
     plt.close(fig)
     buf.seek(0)
-    return buf, df
+    return buf.read(), df  # Return bytes instead of BytesIO
 
 
 # -----------------------------
-# AI ANALYSIS
+# AI ANALYSIS (CACHED)
 # -----------------------------
-def get_ai_analysis(symbol, df, interpretation_level='advanced'):
+@cache.memoize(timeout=600)  # Cache for 10 minutes (AI responses change less)
+def get_ai_analysis(symbol, interpretation_level='advanced'):
     """Get AI analysis of the technical indicators"""
     if not ANTHROPIC_API_KEY:
         return "AI analysis unavailable: API key not configured. Please set ANTHROPIC_API_KEY environment variable."
     
     try:
+        df = get_crypto_data(symbol)
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         
         # Get latest values
@@ -219,8 +231,8 @@ def home():
     df = get_crypto_data(symbol)
     price = float(df["Close"].iloc[-1])
     
-    # Get AI analysis
-    analysis = get_ai_analysis(symbol, df, interpretation_level)
+    # Get AI analysis (now cached)
+    analysis = get_ai_analysis(symbol, interpretation_level)
 
     options = "".join(
         f'<option value="{k}" {"selected" if k==symbol else ""}>{v}</option>'
@@ -485,8 +497,8 @@ def chart():
         return "Invalid coin", 400
 
     try:
-        img, _ = create_chart(symbol)
-        return send_file(img, mimetype="image/png")
+        img_bytes, _ = create_chart(symbol)
+        return send_file(io.BytesIO(img_bytes), mimetype="image/png")
     except Exception as e:
         print(f"Error creating chart: {e}")
         return f"Error generating chart: {str(e)}", 500
@@ -502,7 +514,7 @@ def api_analysis():
     interpretation_level = request.args.get('interpretation_level', 'advanced')
     
     df = get_crypto_data(symbol)
-    analysis = get_ai_analysis(symbol, df, interpretation_level)
+    analysis = get_ai_analysis(symbol, interpretation_level)
     
     return jsonify({
         "symbol": symbol,
