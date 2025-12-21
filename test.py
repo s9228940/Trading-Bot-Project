@@ -1,4 +1,4 @@
-from flask import Flask, send_file, request
+from flask import Flask, send_file, request, jsonify
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -7,8 +7,13 @@ import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta
 import io
+import anthropic
+import os
 
 app = Flask(__name__)
+
+# Get API key from environment variable
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 
 # -----------------------------
 # SUPPORTED COINS
@@ -86,29 +91,34 @@ def create_chart(symbol):
 
     ax1 = plt.subplot(4, 1, 1)
     ax1.plot(df.index, df["Close"], label="Close", color="black")
-    ax1.plot(df.index, df["EMA_12"], label="EMA 12")
-    ax1.plot(df.index, df["EMA_26"], label="EMA 26")
-    ax1.plot(df.index, df["EMA_50"], label="EMA 50")
+    ax1.plot(df.index, df["EMA_12"], label="EMA 12", alpha=0.7)
+    ax1.plot(df.index, df["EMA_26"], label="EMA 26", alpha=0.7)
+    ax1.plot(df.index, df["EMA_50"], label="EMA 50", alpha=0.7)
+    ax1.set_ylabel("Price (USD)")
     ax1.legend()
     ax1.grid(alpha=0.3)
 
     ax2 = plt.subplot(4, 1, 2)
     ax2.plot(df.index, df["MACD"], label="MACD")
     ax2.plot(df.index, df["MACD_Signal"], label="Signal")
-    ax2.bar(df.index, df["MACD_Hist"], alpha=0.4)
+    ax2.bar(df.index, df["MACD_Hist"], alpha=0.4, label="Histogram")
     ax2.axhline(0, color="black", linestyle="--")
+    ax2.set_ylabel("MACD")
     ax2.legend()
     ax2.grid(alpha=0.3)
 
     ax3 = plt.subplot(4, 1, 3)
-    ax3.plot(df.index, df["RSI"], color="purple")
-    ax3.axhline(70, color="red", linestyle="--")
-    ax3.axhline(30, color="green", linestyle="--")
+    ax3.plot(df.index, df["RSI"], color="purple", label="RSI")
+    ax3.axhline(70, color="red", linestyle="--", alpha=0.5, label="Overbought")
+    ax3.axhline(30, color="green", linestyle="--", alpha=0.5, label="Oversold")
     ax3.set_ylim(0, 100)
+    ax3.set_ylabel("RSI")
+    ax3.legend()
     ax3.grid(alpha=0.3)
 
     ax4 = plt.subplot(4, 1, 4)
-    ax4.bar(df.index, df["Volume"], alpha=0.6)
+    ax4.bar(df.index, df["Volume"], alpha=0.6, color="blue")
+    ax4.set_ylabel("Volume")
     ax4.grid(alpha=0.3)
 
     for ax in [ax1, ax2, ax3, ax4]:
@@ -121,7 +131,58 @@ def create_chart(symbol):
     plt.savefig(buf, format="png", dpi=120, bbox_inches="tight")
     plt.close(fig)
     buf.seek(0)
-    return buf
+    return buf, df
+
+
+# -----------------------------
+# AI ANALYSIS
+# -----------------------------
+def get_ai_analysis(symbol, df):
+    """Get AI analysis of the technical indicators"""
+    if not ANTHROPIC_API_KEY:
+        return "AI analysis unavailable: API key not configured. Please set ANTHROPIC_API_KEY environment variable."
+    
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        
+        # Get latest values
+        latest = df.iloc[-1]
+        prev = df.iloc[-2]
+        
+        # Calculate trends
+        price_change = ((latest["Close"] - prev["Close"]) / prev["Close"]) * 100
+        
+        prompt = f"""Analyze this cryptocurrency technical data for {COINS[symbol]} ({symbol}):
+
+Current Price: ${latest['Close']:.2f}
+24h Change: {price_change:.2f}%
+
+Technical Indicators:
+- EMA 12: ${latest['EMA_12']:.2f}
+- EMA 26: ${latest['EMA_26']:.2f}
+- EMA 50: ${latest['EMA_50']:.2f}
+- MACD: {latest['MACD']:.4f}
+- MACD Signal: {latest['MACD_Signal']:.4f}
+- MACD Histogram: {latest['MACD_Hist']:.4f}
+- RSI: {latest['RSI']:.2f}
+
+Provide a brief technical analysis (3-4 sentences) covering:
+1. Overall trend (bullish/bearish/neutral)
+2. What the indicators suggest
+3. Key support/resistance levels if relevant
+Keep it concise and actionable."""
+
+        message = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1000,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        return message.content[0].text
+    except Exception as e:
+        return f"Analysis unavailable: {str(e)}"
 
 
 # -----------------------------
@@ -135,6 +196,9 @@ def home():
 
     df = get_crypto_data(symbol)
     price = float(df["Close"].iloc[-1])
+    
+    # Get AI analysis
+    analysis = get_ai_analysis(symbol, df)
 
     options = "".join(
         f'<option value="{k}" {"selected" if k==symbol else ""}>{v}</option>'
@@ -145,18 +209,85 @@ def home():
     <html>
     <head>
         <title>Crypto Dashboard</title>
+        <style>
+            body {{
+                text-align: center;
+                font-family: Arial, sans-serif;
+                background: #f5f5f5;
+                margin: 0;
+                padding: 20px;
+            }}
+            .container {{
+                max-width: 1200px;
+                margin: 0 auto;
+                background: white;
+                padding: 30px;
+                border-radius: 10px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            }}
+            h1 {{
+                color: #333;
+                margin-bottom: 10px;
+            }}
+            h2 {{
+                color: #4CAF50;
+                margin-top: 5px;
+            }}
+            select {{
+                padding: 10px 20px;
+                font-size: 16px;
+                border: 2px solid #4CAF50;
+                border-radius: 5px;
+                background: white;
+                cursor: pointer;
+                margin: 20px 0;
+            }}
+            select:hover {{
+                background: #f0f0f0;
+            }}
+            .analysis-box {{
+                background: #e8f5e9;
+                border-left: 4px solid #4CAF50;
+                padding: 20px;
+                margin: 20px 0;
+                text-align: left;
+                border-radius: 5px;
+            }}
+            .analysis-box h3 {{
+                margin-top: 0;
+                color: #2E7D32;
+            }}
+            .analysis-box p {{
+                color: #333;
+                line-height: 1.6;
+            }}
+            img {{
+                max-width: 100%;
+                height: auto;
+                margin-top: 20px;
+                border-radius: 5px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            }}
+        </style>
     </head>
-    <body style="text-align:center;font-family:Arial;">
-        <h1>{COINS[symbol]} Dashboard</h1>
-        <h2>Price: ${price:,.2f}</h2>
+    <body>
+        <div class="container">
+            <h1>{COINS[symbol]} Dashboard</h1>
+            <h2>Current Price: ${price:,.2f}</h2>
 
-        <form method="get">
-            <select name="coin" onchange="this.form.submit()">
-                {options}
-            </select>
-        </form>
+            <form method="get">
+                <select name="coin" onchange="this.form.submit()">
+                    {options}
+                </select>
+            </form>
 
-        <img src="/chart?coin={symbol}" width="900"/>
+            <div class="analysis-box">
+                <h3>🤖 AI Technical Analysis</h3>
+                <p>{analysis}</p>
+            </div>
+
+            <img src="/chart?coin={symbol}" width="100%"/>
+        </div>
     </body>
     </html>
     """
@@ -168,8 +299,25 @@ def chart():
     if symbol not in COINS:
         return "Invalid coin", 400
 
-    img = create_chart(symbol)
+    img, _ = create_chart(symbol)
     return send_file(img, mimetype="image/png")
+
+
+@app.route("/api/analysis")
+def api_analysis():
+    """API endpoint for getting just the analysis"""
+    symbol = request.args.get("coin", "BTC").upper()
+    if symbol not in COINS:
+        return jsonify({"error": "Invalid coin"}), 400
+    
+    df = get_crypto_data(symbol)
+    analysis = get_ai_analysis(symbol, df)
+    
+    return jsonify({
+        "symbol": symbol,
+        "name": COINS[symbol],
+        "analysis": analysis
+    })
 
 
 if __name__ == "__main__":
