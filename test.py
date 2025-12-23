@@ -739,7 +739,7 @@ def home():
             </div>
 
             <div class="disclaimer">
-                <strong>⚠️ Educational Purpose Only:</strong> This analysis is for educational purposes only and does not constitute financial advice. Cryptocurrency trading carries significant risk. Always do your own research and consult with a financial advisor before making investment decisions.
+                <strong>⚠️ Educational Purpose Only:</strong> This analysis is for educational purposes only and does not constitute financial advice. AI may not always have up-to-date information. Cryptocurrency trading carries significant risk. Always do your own research and consult with a financial advisor before making investment decisions.
             </div>
         </div>
     </body>
