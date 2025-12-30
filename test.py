@@ -444,10 +444,12 @@ def create_chart(symbol, days=90):
 # AI ANALYSIS (CACHED with longer timeout)
 # -----------------------------
 @cache.memoize(timeout=900)  # Cache for 15 minutes to avoid rate limits
-def get_ai_analysis(symbol, interpretation_level='advanced', days=90):
+def get_ai_analysis(symbol, interpretation_level='advanced', days=90, lang='en'):
     """Get AI analysis with timeout and confidence"""
     if not ANTHROPIC_API_KEY:
         return "AI analysis unavailable: API key not configured.", "N/A"
+    
+    t = TRANSLATIONS.get(lang, TRANSLATIONS['en'])
     
     try:
         df = get_crypto_data(symbol, days)
@@ -459,7 +461,144 @@ def get_ai_analysis(symbol, interpretation_level='advanced', days=90):
         prev = df.iloc[-2]
         price_change = ((indicators['price'] - prev["Close"]) / prev["Close"]) * 100
         
-        prompt_base = f"""Analyze this cryptocurrency technical data for {COINS[symbol]} ({symbol}) over the last {days} days:
+        # Language-specific prompts
+        if lang == 'es':
+            prompt_base = f"""Analiza estos datos técnicos de criptomonedas para {COINS[symbol]} ({symbol}) durante los últimos {days} días:
+
+Precio Actual: ${indicators['price']:.2f} (cambio 24h: {price_change:+.2f}%)
+
+Indicadores Técnicos y Tendencias:
+- RSI: {indicators['rsi']:.2f} (cambio 5 días: {indicators['rsi_5d_change']:+.2f})
+- MACD: {indicators['macd']:.4f}
+- Señal MACD: {indicators['macd_signal']:.4f}
+- Histograma MACD: {indicators['macd_hist']:.4f} (cambio 5 días: {indicators['macd_hist_5d_change']:+.4f})
+- Precio vs EMA-50: {indicators['price_vs_ema50_pct']:+.2f}%
+- Alineación EMA: 12=${indicators['ema_12']:.2f}, 26=${indicators['ema_26']:.2f}, 50=${indicators['ema_50']:.2f}
+
+"""
+            if interpretation_level == 'beginner':
+                prompt_base += """Proporciona una explicación simple (2-3 oraciones) de lo que significan estos indicadores en español claro.
+Enfócate en si el sentimiento del mercado parece positivo, negativo o neutral. Evita la jerga técnica.
+
+IMPORTANTE: Este es solo análisis educativo, no asesoramiento financiero. No uses palabras como "comprar", "vender" o "precio objetivo"."""
+            else:
+                prompt_base += """Proporciona un análisis técnico (3-4 oraciones) cubriendo:
+1. Tendencia general basada en la alineación de indicadores
+2. Señales de momento del RSI y tendencias MACD
+3. Observaciones clave de los cambios de 5 días
+
+IMPORTANTE: Este es solo análisis educativo, no asesoramiento financiero. Enfócate en la interpretación, no en recomendaciones de trading."""
+        
+        elif lang == 'fr':
+            prompt_base = f"""Analysez ces données techniques de cryptomonnaie pour {COINS[symbol]} ({symbol}) sur les {days} derniers jours:
+
+Prix Actuel: ${indicators['price']:.2f} (changement 24h: {price_change:+.2f}%)
+
+Indicateurs Techniques et Tendances:
+- RSI: {indicators['rsi']:.2f} (changement 5 jours: {indicators['rsi_5d_change']:+.2f})
+- MACD: {indicators['macd']:.4f}
+- Signal MACD: {indicators['macd_signal']:.4f}
+- Histogramme MACD: {indicators['macd_hist']:.4f} (changement 5 jours: {indicators['macd_hist_5d_change']:+.4f})
+- Prix vs EMA-50: {indicators['price_vs_ema50_pct']:+.2f}%
+- Alignement EMA: 12=${indicators['ema_12']:.2f}, 26=${indicators['ema_26']:.2f}, 50=${indicators['ema_50']:.2f}
+
+"""
+            if interpretation_level == 'beginner':
+                prompt_base += """Fournissez une explication simple (2-3 phrases) de ce que signifient ces indicateurs en français clair.
+Concentrez-vous sur la question de savoir si le sentiment du marché semble positif, négatif ou neutre. Évitez le jargon.
+
+IMPORTANT: Ceci est uniquement une analyse éducative, pas un conseil financier. N'utilisez pas de mots comme "acheter", "vendre" ou "prix cible"."""
+            else:
+                prompt_base += """Fournissez une analyse technique (3-4 phrases) couvrant:
+1. Tendance globale basée sur l'alignement des indicateurs
+2. Signaux de momentum du RSI et tendances MACD
+3. Observations clés des changements sur 5 jours
+
+IMPORTANT: Ceci est uniquement une analyse éducative, pas un conseil financier. Concentrez-vous sur l'interprétation, pas sur les recommandations de trading."""
+        
+        elif lang == 'de':
+            prompt_base = f"""Analysieren Sie diese Kryptowährungs-Technischen Daten für {COINS[symbol]} ({symbol}) über die letzten {days} Tage:
+
+Aktueller Preis: ${indicators['price']:.2f} (24h Änderung: {price_change:+.2f}%)
+
+Technische Indikatoren und Trends:
+- RSI: {indicators['rsi']:.2f} (5-Tage-Änderung: {indicators['rsi_5d_change']:+.2f})
+- MACD: {indicators['macd']:.4f}
+- MACD Signal: {indicators['macd_signal']:.4f}
+- MACD Histogramm: {indicators['macd_hist']:.4f} (5-Tage-Änderung: {indicators['macd_hist_5d_change']:+.4f})
+- Preis vs EMA-50: {indicators['price_vs_ema50_pct']:+.2f}%
+- EMA Ausrichtung: 12=${indicators['ema_12']:.2f}, 26=${indicators['ema_26']:.2f}, 50=${indicators['ema_50']:.2f}
+
+"""
+            if interpretation_level == 'beginner':
+                prompt_base += """Geben Sie eine einfache Erklärung (2-3 Sätze) darüber, was diese Indikatoren in klarem Deutsch bedeuten.
+Konzentrieren Sie sich darauf, ob die Marktstimmung positiv, negativ oder neutral erscheint. Vermeiden Sie Fachjargon.
+
+WICHTIG: Dies ist nur eine Bildungsanalyse, keine Finanzberatung. Verwenden Sie keine Wörter wie "kaufen", "verkaufen" oder "Zielpreis"."""
+            else:
+                prompt_base += """Geben Sie eine technische Analyse (3-4 Sätze) zu:
+1. Gesamttrend basierend auf Indikatorausrichtung
+2. Momentum-Signale von RSI und MACD-Trends
+3. Wichtige Beobachtungen aus den 5-Tage-Änderungen
+
+WICHTIG: Dies ist nur eine Bildungsanalyse, keine Finanzberatung. Konzentrieren Sie sich auf die Interpretation, nicht auf Handelsempfehlungen."""
+        
+        elif lang == 'zh':
+            prompt_base = f"""分析{COINS[symbol]} ({symbol})在过去{days}天的加密货币技术数据：
+
+当前价格：${indicators['price']:.2f}（24小时变化：{price_change:+.2f}%）
+
+技术指标和趋势：
+- RSI：{indicators['rsi']:.2f}（5天变化：{indicators['rsi_5d_change']:+.2f}）
+- MACD：{indicators['macd']:.4f}
+- MACD信号：{indicators['macd_signal']:.4f}
+- MACD柱状图：{indicators['macd_hist']:.4f}（5天变化：{indicators['macd_hist_5d_change']:+.4f}）
+- 价格相对EMA-50：{indicators['price_vs_ema50_pct']:+.2f}%
+- EMA排列：12=${indicators['ema_12']:.2f}，26=${indicators['ema_26']:.2f}，50=${indicators['ema_50']:.2f}
+
+"""
+            if interpretation_level == 'beginner':
+                prompt_base += """用简单的中文解释（2-3句话）这些指标的含义。
+重点说明市场情绪是看涨、看跌还是中性。避免使用专业术语。
+
+重要提示：这仅用于教育分析，不构成财务建议。不要使用"买入"、"卖出"或"目标价格"等词语。"""
+            else:
+                prompt_base += """提供技术分析（3-4句话），涵盖：
+1. 基于指标排列的整体趋势
+2. 来自RSI和MACD趋势的动量信号
+3. 5天变化的关键观察
+
+重要提示：这仅用于教育分析，不构成财务建议。专注于解读，而非交易建议。"""
+        
+        elif lang == 'tr':
+            prompt_base = f"""{COINS[symbol]} ({symbol}) için son {days} gün içindeki kripto para teknik verilerini analiz edin:
+
+Güncel Fiyat: ${indicators['price']:.2f} (24s değişim: {price_change:+.2f}%)
+
+Teknik Göstergeler ve Trendler:
+- RSI: {indicators['rsi']:.2f} (5 günlük değişim: {indicators['rsi_5d_change']:+.2f})
+- MACD: {indicators['macd']:.4f}
+- MACD Sinyali: {indicators['macd_signal']:.4f}
+- MACD Histogramı: {indicators['macd_hist']:.4f} (5 günlük değişim: {indicators['macd_hist_5d_change']:+.4f})
+- Fiyat vs EMA-50: {indicators['price_vs_ema50_pct']:+.2f}%
+- EMA Hizalaması: 12=${indicators['ema_12']:.2f}, 26=${indicators['ema_26']:.2f}, 50=${indicators['ema_50']:.2f}
+
+"""
+            if interpretation_level == 'beginner':
+                prompt_base += """Bu göstergelerin ne anlama geldiğini basit Türkçe ile açıklayın (2-3 cümle).
+Piyasa duygusunun olumlu, olumsuz veya nötr görünüp görünmediğine odaklanın. Jargondan kaçının.
+
+ÖNEMLİ: Bu sadece eğitim amaçlı analizdir, finansal tavsiye değildir. "Al", "sat" veya "hedef fiyat" gibi kelimeler kullanmayın."""
+            else:
+                prompt_base += """Teknik analiz sağlayın (3-4 cümle):
+1. Gösterge hizalamasına dayalı genel trend
+2. RSI ve MACD trendlerinden momentum sinyalleri
+3. 5 günlük değişimlerden önemli gözlemler
+
+ÖNEMLİ: Bu sadece eğitim amaçlı analizdir, finansal tavsiye değildir. Yoruma odaklanın, alım satım önerilerine değil."""
+        
+        else:  # English (default)
+            prompt_base = f"""Analyze this cryptocurrency technical data for {COINS[symbol]} ({symbol}) over the last {days} days:
 
 Current Price: ${indicators['price']:.2f} (24h change: {price_change:+.2f}%)
 
@@ -472,14 +611,13 @@ Technical Indicators & Trends:
 - EMA Alignment: 12=${indicators['ema_12']:.2f}, 26=${indicators['ema_26']:.2f}, 50=${indicators['ema_50']:.2f}
 
 """
-
-        if interpretation_level == 'beginner':
-            prompt_base += """Provide a simple explanation (2-3 sentences) of what these indicators mean in plain English. 
+            if interpretation_level == 'beginner':
+                prompt_base += """Provide a simple explanation (2-3 sentences) of what these indicators mean in plain English. 
 Focus on whether the market sentiment appears positive, negative, or neutral. Avoid jargon.
 
 IMPORTANT: This is educational analysis only, not financial advice. Do not use words like "buy", "sell", or "target price"."""
-        else:
-            prompt_base += """Provide a technical analysis (3-4 sentences) covering:
+            else:
+                prompt_base += """Provide a technical analysis (3-4 sentences) covering:
 1. Overall trend based on indicator alignment
 2. Momentum signals from RSI and MACD trends
 3. Key observations from the 5-day changes
@@ -496,12 +634,12 @@ IMPORTANT: This is educational analysis only, not financial advice. Focus on int
         return analysis, confidence
         
     except anthropic.APITimeoutError:
-        return "AI analysis temporarily unavailable (timeout). Please try again.", "N/A"
+        return t.get('ai_error_timeout', "AI analysis temporarily unavailable (timeout). Please try again."), "N/A"
     except anthropic.RateLimitError:
-        return "AI analysis temporarily unavailable (rate limit reached). Please try again in a moment.", "N/A"
+        return t.get('ai_error_rate_limit', "AI analysis temporarily unavailable (rate limit reached). Please try again in a moment."), "N/A"
     except Exception as e:
         print(f"AI Error: {e}")
-        return "AI analysis temporarily unavailable. Please try again.", "N/A"
+        return t.get('ai_error_general', "AI analysis temporarily unavailable. Please try again."), "N/A"
 
 
 # -----------------------------
@@ -531,7 +669,7 @@ def home():
     df = get_crypto_data(symbol, days)
     price = float(df["Close"].iloc[-1])
     
-    analysis, confidence = get_ai_analysis(symbol, interpretation_level, days)
+    analysis, confidence = get_ai_analysis(symbol, interpretation_level, days, lang)
 
     options = "".join(
         f'<option value="{k}" {"selected" if k==symbol else ""}>{v}</option>'
@@ -548,13 +686,55 @@ def home():
         for code, name in [('en', 'English'), ('es', 'Español'), ('fr', 'Français'), ('de', 'Deutsch'), ('zh', '中文'), ('tr', 'Türkçe')]
     )
 
-    example_questions = [
-        "What does MACD mean?",
-        "Is momentum strengthening?",
-        "Is RSI signaling overbought conditions?",
-        "What do the EMAs suggest?",
-        "Should I be concerned about the current RSI?"
-    ]
+    # Language-specific example questions
+    if lang == 'es':
+        example_questions = [
+            "¿Qué significa MACD?",
+            "¿Se está fortaleciendo el impulso?",
+            "¿El RSI señala condiciones de sobrecompra?",
+            "¿Qué sugieren las EMAs?",
+            "¿Debería preocuparme por el RSI actual?"
+        ]
+    elif lang == 'fr':
+        example_questions = [
+            "Que signifie MACD?",
+            "Le momentum se renforce-t-il?",
+            "Le RSI signale-t-il des conditions de surachat?",
+            "Que suggèrent les EMA?",
+            "Devrais-je m'inquiéter du RSI actuel?"
+        ]
+    elif lang == 'de':
+        example_questions = [
+            "Was bedeutet MACD?",
+            "Verstärkt sich das Momentum?",
+            "Signalisiert der RSI überkaufte Bedingungen?",
+            "Was schlagen die EMAs vor?",
+            "Sollte ich mir Sorgen über den aktuellen RSI machen?"
+        ]
+    elif lang == 'zh':
+        example_questions = [
+            "MACD是什么意思？",
+            "动量是否在增强？",
+            "RSI是否显示超买状态？",
+            "EMA建议什么？",
+            "我应该担心当前的RSI吗？"
+        ]
+    elif lang == 'tr':
+        example_questions = [
+            "MACD ne anlama gelir?",
+            "Momentum güçleniyor mu?",
+            "RSI aşırı alım koşullarını gösteriyor mu?",
+            "EMA'lar ne öneriyor?",
+            "Mevcut RSI konusunda endişelenmeli miyim?"
+        ]
+    else:  # English
+        example_questions = [
+            "What does MACD mean?",
+            "Is momentum strengthening?",
+            "Is RSI signaling overbought conditions?",
+            "What do the EMAs suggest?",
+            "Should I be concerned about the current RSI?"
+        ]
 
     example_buttons = "".join([
         f'<button class="example-btn" onclick="document.getElementById(\'ai-question\').value=\'{q}\'; askAI();">{q}</button>'
@@ -1207,9 +1387,10 @@ def api_analysis():
     
     interpretation_level = request.args.get('interpretation_level', 'advanced')
     days = int(request.args.get('days', 90))
+    lang = request.args.get('lang', 'en')
     
     df = get_crypto_data(symbol, days)
-    analysis, confidence = get_ai_analysis(symbol, interpretation_level, days)
+    analysis, confidence = get_ai_analysis(symbol, interpretation_level, days, lang)
     
     return jsonify({
         "symbol": symbol,
@@ -1217,7 +1398,8 @@ def api_analysis():
         "analysis": analysis,
         "confidence": confidence,
         "interpretation_level": interpretation_level,
-        "days": days
+        "days": days,
+        "language": lang
     })
 
 
