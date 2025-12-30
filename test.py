@@ -1,4 +1,4 @@
-from flask import Flask, send_file, request, jsonify
+from flask import Flask, send_file, request, jsonify, session
 from flask_caching import Cache
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -14,6 +14,7 @@ import anthropic
 import os
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY", "your-secret-key-change-in-production")
 
 # Configure caching
 app.config['CACHE_TYPE'] = 'simple'
@@ -29,6 +30,210 @@ limiter = Limiter(
 
 # Get API key from environment variable
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+
+# -----------------------------
+# TRANSLATIONS
+# -----------------------------
+TRANSLATIONS = {
+    'en': {
+        'title': 'Crypto Dashboard',
+        'price': 'Price',
+        'cryptocurrency': 'Cryptocurrency',
+        'analysis_level': 'Analysis Level',
+        'beginner': 'Beginner',
+        'advanced': 'Advanced',
+        'ai_analysis': 'AI Technical Analysis',
+        'confidence': 'Confidence',
+        'ask_questions': 'Ask AI Questions',
+        'questions_subtitle': 'Get instant explanations about technical indicators and chart patterns',
+        'quick_questions': 'Quick questions:',
+        'type_question': 'Type your question here...',
+        'ask_ai': 'Ask AI',
+        'disclaimer_title': 'Educational Purpose Only:',
+        'disclaimer_text': 'This analysis is for educational purposes only and does not constitute financial advice. AI may not always have up-to-date information. Cryptocurrency trading carries significant risk. Always do your own research and consult with a financial advisor before making investment decisions.',
+        'timeline': 'Timeline',
+        'days': 'days',
+        'language': 'Language',
+        'subscribe': 'Subscribe for Premium Features',
+        'subscribe_desc': 'Get advanced analytics, real-time alerts, and more',
+        'email_placeholder': 'Enter your email',
+        'subscribe_button': 'Subscribe',
+        'premium_features': 'Premium Features:',
+        'feature_1': '• Real-time price alerts',
+        'feature_2': '• Advanced technical indicators',
+        'feature_3': '• Portfolio tracking',
+        'feature_4': '• Priority AI support',
+        'copyright': '© 2025 Crypto Dashboard. All rights reserved.',
+        'thinking': '🤔 Thinking...',
+        'error': 'Error:',
+        'answer': 'Answer:',
+    },
+    'es': {
+        'title': 'Panel de Criptomonedas',
+        'price': 'Precio',
+        'cryptocurrency': 'Criptomoneda',
+        'analysis_level': 'Nivel de Análisis',
+        'beginner': 'Principiante',
+        'advanced': 'Avanzado',
+        'ai_analysis': 'Análisis Técnico de IA',
+        'confidence': 'Confianza',
+        'ask_questions': 'Hacer Preguntas a la IA',
+        'questions_subtitle': 'Obtenga explicaciones instantáneas sobre indicadores técnicos y patrones de gráficos',
+        'quick_questions': 'Preguntas rápidas:',
+        'type_question': 'Escriba su pregunta aquí...',
+        'ask_ai': 'Preguntar a IA',
+        'disclaimer_title': 'Solo con Fines Educativos:',
+        'disclaimer_text': 'Este análisis es solo para fines educativos y no constituye asesoramiento financiero. La IA puede no tener siempre información actualizada. El comercio de criptomonedas conlleva un riesgo significativo. Siempre haga su propia investigación y consulte con un asesor financiero antes de tomar decisiones de inversión.',
+        'timeline': 'Línea de Tiempo',
+        'days': 'días',
+        'language': 'Idioma',
+        'subscribe': 'Suscríbase para Características Premium',
+        'subscribe_desc': 'Obtenga análisis avanzados, alertas en tiempo real y más',
+        'email_placeholder': 'Ingrese su correo electrónico',
+        'subscribe_button': 'Suscribirse',
+        'premium_features': 'Características Premium:',
+        'feature_1': '• Alertas de precios en tiempo real',
+        'feature_2': '• Indicadores técnicos avanzados',
+        'feature_3': '• Seguimiento de cartera',
+        'feature_4': '• Soporte prioritario de IA',
+        'copyright': '© 2025 Panel de Criptomonedas. Todos los derechos reservados.',
+        'thinking': '🤔 Pensando...',
+        'error': 'Error:',
+        'answer': 'Respuesta:',
+    },
+    'fr': {
+        'title': 'Tableau de Bord Crypto',
+        'price': 'Prix',
+        'cryptocurrency': 'Cryptomonnaie',
+        'analysis_level': 'Niveau d\'Analyse',
+        'beginner': 'Débutant',
+        'advanced': 'Avancé',
+        'ai_analysis': 'Analyse Technique IA',
+        'confidence': 'Confiance',
+        'ask_questions': 'Poser des Questions à l\'IA',
+        'questions_subtitle': 'Obtenez des explications instantanées sur les indicateurs techniques et les modèles graphiques',
+        'quick_questions': 'Questions rapides:',
+        'type_question': 'Tapez votre question ici...',
+        'ask_ai': 'Demander à l\'IA',
+        'disclaimer_title': 'À des Fins Éducatives Uniquement:',
+        'disclaimer_text': 'Cette analyse est uniquement à des fins éducatives et ne constitue pas un conseil financier. L\'IA peut ne pas toujours avoir des informations à jour. Le trading de cryptomonnaies comporte des risques importants. Faites toujours vos propres recherches et consultez un conseiller financier avant de prendre des décisions d\'investissement.',
+        'timeline': 'Chronologie',
+        'days': 'jours',
+        'language': 'Langue',
+        'subscribe': 'S\'abonner aux Fonctionnalités Premium',
+        'subscribe_desc': 'Obtenez des analyses avancées, des alertes en temps réel et plus encore',
+        'email_placeholder': 'Entrez votre e-mail',
+        'subscribe_button': 'S\'abonner',
+        'premium_features': 'Fonctionnalités Premium:',
+        'feature_1': '• Alertes de prix en temps réel',
+        'feature_2': '• Indicateurs techniques avancés',
+        'feature_3': '• Suivi de portefeuille',
+        'feature_4': '• Support IA prioritaire',
+        'copyright': '© 2025 Tableau de Bord Crypto. Tous droits réservés.',
+        'thinking': '🤔 Réflexion...',
+        'error': 'Erreur:',
+        'answer': 'Réponse:',
+    },
+    'de': {
+        'title': 'Krypto-Dashboard',
+        'price': 'Preis',
+        'cryptocurrency': 'Kryptowährung',
+        'analysis_level': 'Analyseebene',
+        'beginner': 'Anfänger',
+        'advanced': 'Fortgeschritten',
+        'ai_analysis': 'KI-Technische Analyse',
+        'confidence': 'Vertrauen',
+        'ask_questions': 'Fragen Sie die KI',
+        'questions_subtitle': 'Erhalten Sie sofortige Erklärungen zu technischen Indikatoren und Chartmustern',
+        'quick_questions': 'Schnelle Fragen:',
+        'type_question': 'Geben Sie hier Ihre Frage ein...',
+        'ask_ai': 'KI fragen',
+        'disclaimer_title': 'Nur zu Bildungszwecken:',
+        'disclaimer_text': 'Diese Analyse dient nur zu Bildungszwecken und stellt keine Finanzberatung dar. Die KI verfügt möglicherweise nicht immer über aktuelle Informationen. Der Handel mit Kryptowährungen birgt erhebliche Risiken. Führen Sie immer Ihre eigenen Recherchen durch und konsultieren Sie einen Finanzberater, bevor Sie Investitionsentscheidungen treffen.',
+        'timeline': 'Zeitleiste',
+        'days': 'Tage',
+        'language': 'Sprache',
+        'subscribe': 'Abonnieren Sie Premium-Funktionen',
+        'subscribe_desc': 'Erhalten Sie erweiterte Analysen, Echtzeit-Warnungen und mehr',
+        'email_placeholder': 'Geben Sie Ihre E-Mail ein',
+        'subscribe_button': 'Abonnieren',
+        'premium_features': 'Premium-Funktionen:',
+        'feature_1': '• Echtzeit-Preiswarnungen',
+        'feature_2': '• Erweiterte technische Indikatoren',
+        'feature_3': '• Portfolio-Tracking',
+        'feature_4': '• Prioritärer KI-Support',
+        'copyright': '© 2025 Krypto-Dashboard. Alle Rechte vorbehalten.',
+        'thinking': '🤔 Denke nach...',
+        'error': 'Fehler:',
+        'answer': 'Antwort:',
+    },
+    'zh': {
+        'title': '加密货币仪表板',
+        'price': '价格',
+        'cryptocurrency': '加密货币',
+        'analysis_level': '分析级别',
+        'beginner': '初学者',
+        'advanced': '高级',
+        'ai_analysis': 'AI技术分析',
+        'confidence': '置信度',
+        'ask_questions': '向AI提问',
+        'questions_subtitle': '获取有关技术指标和图表模式的即时解释',
+        'quick_questions': '快速问题：',
+        'type_question': '在此输入您的问题...',
+        'ask_ai': '询问AI',
+        'disclaimer_title': '仅供教育目的：',
+        'disclaimer_text': '此分析仅供教育目的，不构成财务建议。AI可能并不总是拥有最新信息。加密货币交易具有重大风险。在做出投资决策之前，请务必进行自己的研究并咨询财务顾问。',
+        'timeline': '时间线',
+        'days': '天',
+        'language': '语言',
+        'subscribe': '订阅高级功能',
+        'subscribe_desc': '获取高级分析、实时警报等',
+        'email_placeholder': '输入您的电子邮件',
+        'subscribe_button': '订阅',
+        'premium_features': '高级功能：',
+        'feature_1': '• 实时价格警报',
+        'feature_2': '• 高级技术指标',
+        'feature_3': '• 投资组合跟踪',
+        'feature_4': '• 优先AI支持',
+        'copyright': '© 2025 加密货币仪表板。保留所有权利。',
+        'thinking': '🤔 思考中...',
+        'error': '错误：',
+        'answer': '答案：',
+    },
+    'tr': {
+        'title': 'Kripto Para Panosu',
+        'price': 'Fiyat',
+        'cryptocurrency': 'Kripto Para',
+        'analysis_level': 'Analiz Seviyesi',
+        'beginner': 'Başlangıç',
+        'advanced': 'İleri Seviye',
+        'ai_analysis': 'Yapay Zeka Teknik Analizi',
+        'confidence': 'Güven',
+        'ask_questions': 'Yapay Zekaya Soru Sorun',
+        'questions_subtitle': 'Teknik göstergeler ve grafik desenleri hakkında anında açıklamalar alın',
+        'quick_questions': 'Hızlı sorular:',
+        'type_question': 'Sorunuzu buraya yazın...',
+        'ask_ai': 'Yapay Zekaya Sor',
+        'disclaimer_title': 'Sadece Eğitim Amaçlıdır:',
+        'disclaimer_text': 'Bu analiz yalnızca eğitim amaçlıdır ve finansal tavsiye niteliği taşımaz. Yapay zeka her zaman güncel bilgilere sahip olmayabilir. Kripto para ticareti önemli risk taşır. Yatırım kararları vermeden önce her zaman kendi araştırmanızı yapın ve bir finansal danışmana danışın.',
+        'timeline': 'Zaman Çizelgesi',
+        'days': 'gün',
+        'language': 'Dil',
+        'subscribe': 'Premium Özelliklere Abone Olun',
+        'subscribe_desc': 'Gelişmiş analizler, gerçek zamanlı uyarılar ve daha fazlasını edinin',
+        'email_placeholder': 'E-posta adresinizi girin',
+        'subscribe_button': 'Abone Ol',
+        'premium_features': 'Premium Özellikler:',
+        'feature_1': '• Gerçek zamanlı fiyat uyarıları',
+        'feature_2': '• Gelişmiş teknik göstergeler',
+        'feature_3': '• Portföy takibi',
+        'feature_4': '• Öncelikli yapay zeka desteği',
+        'copyright': '© 2025 Kripto Para Panosu. Tüm hakları saklıdır.',
+        'thinking': '🤔 Düşünüyor...',
+        'error': 'Hata:',
+        'answer': 'Cevap:',
+    }
+}
 
 # -----------------------------
 # SUPPORTED COINS
@@ -54,9 +259,9 @@ COINS = {
 # DATA + INDICATORS (CACHED)
 # -----------------------------
 @cache.memoize(timeout=300)
-def get_crypto_data(symbol):
+def get_crypto_data(symbol, days=90):
     end = datetime.now()
-    start = end - timedelta(days=90)
+    start = end - timedelta(days=days)
 
     ticker = f"{symbol}-USD"
     try:
@@ -163,13 +368,13 @@ def calculate_confidence(indicators):
 # CHART (CACHED)
 # -----------------------------
 @cache.memoize(timeout=300)
-def create_chart(symbol):
-    df = get_crypto_data(symbol)
+def create_chart(symbol, days=90):
+    df = get_crypto_data(symbol, days)
     name = COINS[symbol]
     indicators = get_indicator_summary(df)
 
     fig = plt.figure(figsize=(15, 12))
-    fig.suptitle(f"{name} ({symbol}-USD) Technical Analysis", fontsize=16, fontweight='bold')
+    fig.suptitle(f"{name} ({symbol}-USD) Technical Analysis - Last {days} Days", fontsize=16, fontweight='bold')
 
     ax1 = plt.subplot(4, 1, 1)
     ax1.plot(df.index, df["Close"], label="Close", color="black", linewidth=2)
@@ -239,13 +444,13 @@ def create_chart(symbol):
 # AI ANALYSIS (CACHED)
 # -----------------------------
 @cache.memoize(timeout=600)
-def get_ai_analysis(symbol, interpretation_level='advanced'):
+def get_ai_analysis(symbol, interpretation_level='advanced', days=90):
     """Get AI analysis with timeout and confidence"""
     if not ANTHROPIC_API_KEY:
         return "AI analysis unavailable: API key not configured.", "N/A"
     
     try:
-        df = get_crypto_data(symbol)
+        df = get_crypto_data(symbol, days)
         indicators = get_indicator_summary(df)
         confidence = calculate_confidence(indicators)
         
@@ -254,7 +459,7 @@ def get_ai_analysis(symbol, interpretation_level='advanced'):
         prev = df.iloc[-2]
         price_change = ((indicators['price'] - prev["Close"]) / prev["Close"]) * 100
         
-        prompt_base = f"""Analyze this cryptocurrency technical data for {COINS[symbol]} ({symbol}):
+        prompt_base = f"""Analyze this cryptocurrency technical data for {COINS[symbol]} ({symbol}) over the last {days} days:
 
 Current Price: ${indicators['price']:.2f} (24h change: {price_change:+.2f}%)
 
@@ -307,11 +512,24 @@ def home():
         symbol = "BTC"
 
     interpretation_level = request.args.get('interpretation_level', 'advanced')
+    days = int(request.args.get('days', 90))
+    lang = request.args.get('lang', 'en')
+    
+    if lang not in TRANSLATIONS:
+        lang = 'en'
+    
+    t = TRANSLATIONS[lang]
+    
+    # Validate days range
+    if days < 7:
+        days = 7
+    elif days > 365:
+        days = 365
 
-    df = get_crypto_data(symbol)
+    df = get_crypto_data(symbol, days)
     price = float(df["Close"].iloc[-1])
     
-    analysis, confidence = get_ai_analysis(symbol, interpretation_level)
+    analysis, confidence = get_ai_analysis(symbol, interpretation_level, days)
 
     options = "".join(
         f'<option value="{k}" {"selected" if k==symbol else ""}>{v}</option>'
@@ -319,9 +537,14 @@ def home():
     )
 
     interpretation_select = f"""
-        <option value="beginner" {"selected" if interpretation_level=="beginner" else ""}>Beginner</option>
-        <option value="advanced" {"selected" if interpretation_level=="advanced" else ""}>Advanced</option>
+        <option value="beginner" {"selected" if interpretation_level=="beginner" else ""}>{t['beginner']}</option>
+        <option value="advanced" {"selected" if interpretation_level=="advanced" else ""}>{t['advanced']}</option>
     """
+
+    language_options = "".join(
+        f'<option value="{code}" {"selected" if code==lang else ""}>{name}</option>'
+        for code, name in [('en', 'English'), ('es', 'Español'), ('fr', 'Français'), ('de', 'Deutsch'), ('zh', '中文'), ('tr', 'Türkçe')]
+    )
 
     example_questions = [
         "What does MACD mean?",
@@ -338,11 +561,11 @@ def home():
 
     return f"""
     <!DOCTYPE html>
-    <html lang="en">
+    <html lang="{lang}">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>{COINS[symbol]} Crypto Dashboard</title>
+        <title>{COINS[symbol]} {t['title']}</title>
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
         <style>
             * {{
@@ -390,7 +613,7 @@ def home():
             .controls {{
                 display: flex;
                 justify-content: center;
-                gap: 30px;
+                gap: 20px;
                 margin-bottom: 30px;
                 flex-wrap: wrap;
             }}
@@ -430,6 +653,60 @@ def home():
                 box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
             }}
             
+            .timeline-control {{
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                min-width: 300px;
+            }}
+            
+            .timeline-control input[type="range"] {{
+                width: 100%;
+                height: 8px;
+                border-radius: 5px;
+                background: #e5e7eb;
+                outline: none;
+                -webkit-appearance: none;
+            }}
+            
+            .timeline-control input[type="range"]::-webkit-slider-thumb {{
+                -webkit-appearance: none;
+                appearance: none;
+                width: 20px;
+                height: 20px;
+                border-radius: 50%;
+                background: #667eea;
+                cursor: pointer;
+                transition: all 0.3s;
+            }}
+            
+            .timeline-control input[type="range"]::-webkit-slider-thumb:hover {{
+                background: #764ba2;
+                transform: scale(1.2);
+            }}
+            
+            .timeline-control input[type="range"]::-moz-range-thumb {{
+                width: 20px;
+                height: 20px;
+                border-radius: 50%;
+                background: #667eea;
+                cursor: pointer;
+                border: none;
+                transition: all 0.3s;
+            }}
+            
+            .timeline-control input[type="range"]::-moz-range-thumb:hover {{
+                background: #764ba2;
+                transform: scale(1.2);
+            }}
+            
+            .timeline-value {{
+                text-align: center;
+                font-weight: 600;
+                color: #667eea;
+                font-size: 1.1rem;
+            }}
+            
             .info-card {{
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                 color: white;
@@ -460,6 +737,73 @@ def home():
             .info-card p {{
                 line-height: 1.8;
                 font-size: 1.05rem;
+            }}
+            
+            .subscription-card {{
+                background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+                color: white;
+                padding: 25px;
+                border-radius: 15px;
+                margin-bottom: 25px;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            }}
+            
+            .subscription-card h3 {{
+                font-size: 1.3rem;
+                margin-bottom: 10px;
+            }}
+            
+            .subscription-card .subtitle {{
+                margin-bottom: 20px;
+                opacity: 0.9;
+            }}
+            
+            .subscription-form {{
+                display: flex;
+                gap: 10px;
+                margin-bottom: 15px;
+            }}
+            
+            .subscription-input {{
+                flex: 1;
+                padding: 12px 18px;
+                font-size: 16px;
+                border: 2px solid rgba(255,255,255,0.3);
+                border-radius: 10px;
+                background: rgba(255,255,255,0.2);
+                color: white;
+                font-family: inherit;
+            }}
+            
+            .subscription-input::placeholder {{
+                color: rgba(255,255,255,0.7);
+            }}
+            
+            .subscription-button {{
+                padding: 12px 30px;
+                font-size: 16px;
+                background: white;
+                color: #d97706;
+                border: none;
+                border-radius: 10px;
+                cursor: pointer;
+                font-weight: 600;
+                transition: all 0.3s;
+            }}
+            
+            .subscription-button:hover {{
+                background: #fef3c7;
+                transform: translateY(-2px);
+            }}
+            
+            .premium-features {{
+                list-style: none;
+                padding: 0;
+            }}
+            
+            .premium-features li {{
+                padding: 5px 0;
+                opacity: 0.95;
             }}
             
             .question-card {{
@@ -604,11 +948,13 @@ def home():
                 color: #92400e;
             }}
             
-            .tooltip {{
-                position: relative;
-                display: inline-block;
-                cursor: help;
-                color: #667eea;
+            .footer {{
+                text-align: center;
+                margin-top: 30px;
+                padding-top: 20px;
+                border-top: 2px solid #e5e7eb;
+                color: #6b7280;
+                font-size: 0.9rem;
             }}
             
             @media (max-width: 768px) {{
@@ -628,14 +974,32 @@ def home():
                 .input-group {{
                     flex-direction: column;
                 }}
+                .subscription-form {{
+                    flex-direction: column;
+                }}
+                .timeline-control {{
+                    min-width: 100%;
+                }}
             }}
         </style>
         <script>
+            function updateTimeline(value) {{
+                document.getElementById('timeline-value').textContent = value;
+                const form = document.getElementById('timeline-form');
+                form.submit();
+            }}
+            
             async function askAI() {{
                 const question = document.getElementById('ai-question').value.trim();
                 const answerBox = document.getElementById('answer-box');
                 const answerText = document.getElementById('answer-text');
                 const askButton = document.getElementById('ask-button');
+                const lang = '{lang}';
+                const t = {{
+                    thinking: '{t['thinking']}',
+                    error: '{t['error']}',
+                    answer: '{t['answer']}'
+                }};
                 
                 if (!question) {{
                     alert('Please enter a question!');
@@ -644,7 +1008,7 @@ def home():
                 
                 askButton.disabled = true;
                 answerBox.classList.add('show');
-                answerText.innerHTML = '<span class="loading">🤔 Thinking...</span>';
+                answerText.innerHTML = '<span class="loading">' + t.thinking + '</span>';
                 
                 try {{
                     const response = await fetch('/api/ask', {{
@@ -656,15 +1020,22 @@ def home():
                     const data = await response.json();
                     
                     if (data.error) {{
-                        answerText.innerHTML = '<strong style="color: #dc2626;">Error:</strong> ' + data.error;
+                        answerText.innerHTML = '<strong style="color: #dc2626;">' + t.error + '</strong> ' + data.error;
                     }} else {{
-                        answerText.innerHTML = '<strong>Answer:</strong> ' + data.answer;
+                        answerText.innerHTML = '<strong>' + t.answer + '</strong> ' + data.answer;
                     }}
                 }} catch (error) {{
-                    answerText.innerHTML = '<strong style="color: #dc2626;">Error:</strong> Failed to get answer. Please try again.';
+                    answerText.innerHTML = '<strong style="color: #dc2626;">' + t.error + '</strong> Failed to get answer. Please try again.';
                 }} finally {{
                     askButton.disabled = false;
                 }}
+            }}
+            
+            function handleSubscribe(event) {{
+                event.preventDefault();
+                const email = document.getElementById('subscribe-email').value;
+                alert('Thank you for your interest! We will send premium information to: ' + email);
+                document.getElementById('subscribe-email').value = '';
             }}
             
             document.addEventListener('DOMContentLoaded', function() {{
@@ -676,46 +1047,98 @@ def home():
     </head>
     <body>
         <div class="header">
-            <h1>📈 {COINS[symbol]} Dashboard</h1>
+            <h1>📈 {COINS[symbol]} {t['title']}</h1>
             <div class="price-display">${price:,.2f} USD</div>
         </div>
         
         <div class="container">
             <div class="controls">
                 <div class="control-group">
-                    <label for="coin">Cryptocurrency</label>
+                    <label for="coin">{t['cryptocurrency']}</label>
                     <form method="get" style="margin: 0;">
                         <select name="coin" id="coin" onchange="this.form.submit()">
                             {options}
                         </select>
                         <input type="hidden" name="interpretation_level" value="{interpretation_level}">
+                        <input type="hidden" name="days" value="{days}">
+                        <input type="hidden" name="lang" value="{lang}">
                     </form>
                 </div>
+                
                 <div class="control-group">
-                    <label for="interpretation_level">Analysis Level</label>
+                    <label for="interpretation_level">{t['analysis_level']}</label>
                     <form method="get" style="margin: 0;">
                         <select name="interpretation_level" id="interpretation_level" onchange="this.form.submit()">
                             {interpretation_select}
                         </select>
                         <input type="hidden" name="coin" value="{symbol}">
+                        <input type="hidden" name="days" value="{days}">
+                        <input type="hidden" name="lang" value="{lang}">
                     </form>
+                </div>
+                
+                <div class="control-group">
+                    <label for="language">{t['language']}</label>
+                    <form method="get" style="margin: 0;">
+                        <select name="lang" id="language" onchange="this.form.submit()">
+                            {language_options}
+                        </select>
+                        <input type="hidden" name="coin" value="{symbol}">
+                        <input type="hidden" name="interpretation_level" value="{interpretation_level}">
+                        <input type="hidden" name="days" value="{days}">
+                    </form>
+                </div>
+            </div>
+            
+            <div class="timeline-control">
+                <label for="timeline">{t['timeline']}: <span id="timeline-value" class="timeline-value">{days} {t['days']}</span></label>
+                <form id="timeline-form" method="get">
+                    <input type="range" id="timeline" name="days" min="7" max="365" value="{days}" 
+                           oninput="updateTimeline(this.value)">
+                    <input type="hidden" name="coin" value="{symbol}">
+                    <input type="hidden" name="interpretation_level" value="{interpretation_level}">
+                    <input type="hidden" name="lang" value="{lang}">
+                </form>
+            </div>
+
+            <div class="subscription-card">
+                <h3>⭐ {t['subscribe']}</h3>
+                <p class="subtitle">{t['subscribe_desc']}</p>
+                <form class="subscription-form" onsubmit="handleSubscribe(event)">
+                    <input 
+                        type="email" 
+                        id="subscribe-email" 
+                        class="subscription-input" 
+                        placeholder="{t['email_placeholder']}"
+                        required
+                    />
+                    <button type="submit" class="subscription-button">{t['subscribe_button']}</button>
+                </form>
+                <div class="premium-features">
+                    <strong>{t['premium_features']}</strong>
+                    <ul style="list-style: none; padding: 0; margin-top: 10px;">
+                        <li>{t['feature_1']}</li>
+                        <li>{t['feature_2']}</li>
+                        <li>{t['feature_3']}</li>
+                        <li>{t['feature_4']}</li>
+                    </ul>
                 </div>
             </div>
 
             <div class="info-card">
                 <h3>
-                    🤖 AI Technical Analysis
-                    <span class="confidence-badge">Confidence: {confidence}</span>
+                    🤖 {t['ai_analysis']}
+                    <span class="confidence-badge">{t['confidence']}: {confidence}</span>
                 </h3>
                 <p>{analysis}</p>
             </div>
 
             <div class="question-card">
-                <h3>💬 Ask AI Questions</h3>
-                <p class="subtitle">Get instant explanations about technical indicators and chart patterns</p>
+                <h3>💬 {t['ask_questions']}</h3>
+                <p class="subtitle">{t['questions_subtitle']}</p>
                 
                 <div class="example-questions">
-                    <small style="width: 100%; display: block; margin-bottom: 8px; color: #6b7280; font-weight: 600;">Quick questions:</small>
+                    <small style="width: 100%; display: block; margin-bottom: 8px; color: #6b7280; font-weight: 600;">{t['quick_questions']}</small>
                     {example_buttons}
                 </div>
                 
@@ -724,9 +1147,9 @@ def home():
                         type="text" 
                         id="ai-question" 
                         class="question-input" 
-                        placeholder="Type your question here..."
+                        placeholder="{t['type_question']}"
                     />
-                    <button id="ask-button" class="ask-button" onclick="askAI()">Ask AI</button>
+                    <button id="ask-button" class="ask-button" onclick="askAI()">{t['ask_ai']}</button>
                 </div>
                 
                 <div id="answer-box" class="answer-box">
@@ -735,11 +1158,15 @@ def home():
             </div>
 
             <div class="chart-container">
-                <img src="/chart?coin={symbol}" alt="{COINS[symbol]} Technical Analysis Chart"/>
+                <img src="/chart?coin={symbol}&days={days}" alt="{COINS[symbol]} Technical Analysis Chart"/>
             </div>
 
             <div class="disclaimer">
-                <strong>⚠️ Educational Purpose Only:</strong> This analysis is for educational purposes only and does not constitute financial advice. AI may not always have up-to-date information. Cryptocurrency trading carries significant risk. Always do your own research and consult with a financial advisor before making investment decisions.
+                <strong>⚠️ {t['disclaimer_title']}</strong> {t['disclaimer_text']}
+            </div>
+            
+            <div class="footer">
+                {t['copyright']}
             </div>
         </div>
     </body>
@@ -750,11 +1177,19 @@ def home():
 @app.route("/chart")
 def chart():
     symbol = request.args.get("coin", "BTC").upper()
+    days = int(request.args.get("days", 90))
+    
     if symbol not in COINS:
         return "Invalid coin", 400
+    
+    # Validate days range
+    if days < 7:
+        days = 7
+    elif days > 365:
+        days = 365
 
     try:
-        img_bytes, _ = create_chart(symbol)
+        img_bytes, _ = create_chart(symbol, days)
         return send_file(io.BytesIO(img_bytes), mimetype="image/png")
     except Exception as e:
         print(f"Error creating chart: {e}")
@@ -768,16 +1203,18 @@ def api_analysis():
         return jsonify({"error": "Invalid coin"}), 400
     
     interpretation_level = request.args.get('interpretation_level', 'advanced')
+    days = int(request.args.get('days', 90))
     
-    df = get_crypto_data(symbol)
-    analysis, confidence = get_ai_analysis(symbol, interpretation_level)
+    df = get_crypto_data(symbol, days)
+    analysis, confidence = get_ai_analysis(symbol, interpretation_level, days)
     
     return jsonify({
         "symbol": symbol,
         "name": COINS[symbol],
         "analysis": analysis,
         "confidence": confidence,
-        "interpretation_level": interpretation_level
+        "interpretation_level": interpretation_level,
+        "days": days
     })
 
 
@@ -833,6 +1270,33 @@ IMPORTANT: This is educational only. Avoid trading recommendations. Do not use "
     except Exception as e:
         print(f"Ask AI Error: {e}")
         return jsonify({"error": "Failed to process question. Please try again."}), 500
+
+
+@app.route("/api/subscribe", methods=["POST"])
+@limiter.limit("5 per hour")
+def subscribe():
+    """Handle subscription requests"""
+    try:
+        data = request.get_json()
+        email = data.get("email", "").strip()
+        
+        if not email:
+            return jsonify({"error": "Email is required"}), 400
+        
+        # Here you would typically:
+        # 1. Validate email format
+        # 2. Store in database
+        # 3. Send confirmation email
+        # For now, just return success
+        
+        return jsonify({
+            "success": True,
+            "message": f"Thank you for subscribing! We'll send updates to {email}"
+        })
+        
+    except Exception as e:
+        print(f"Subscribe Error: {e}")
+        return jsonify({"error": "Failed to process subscription"}), 500
 
 
 if __name__ == "__main__":
