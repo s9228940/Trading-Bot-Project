@@ -16,7 +16,7 @@ import os
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "your-secret-key-change-in-production")
 
-# Configure caching
+# Configure caching - increased timeout to reduce API calls
 app.config['CACHE_TYPE'] = 'simple'
 app.config['CACHE_DEFAULT_TIMEOUT'] = 300
 cache = Cache(app)
@@ -441,9 +441,9 @@ def create_chart(symbol, days=90):
 
 
 # -----------------------------
-# AI ANALYSIS (CACHED)
+# AI ANALYSIS (CACHED with longer timeout)
 # -----------------------------
-@cache.memoize(timeout=600)
+@cache.memoize(timeout=900)  # Cache for 15 minutes to avoid rate limits
 def get_ai_analysis(symbol, interpretation_level='advanced', days=90):
     """Get AI analysis with timeout and confidence"""
     if not ANTHROPIC_API_KEY:
@@ -495,8 +495,10 @@ IMPORTANT: This is educational analysis only, not financial advice. Focus on int
         analysis = message.content[0].text
         return analysis, confidence
         
-    except anthropic.TimeoutError:
+    except anthropic.APITimeoutError:
         return "AI analysis temporarily unavailable (timeout). Please try again.", "N/A"
+    except anthropic.RateLimitError:
+        return "AI analysis temporarily unavailable (rate limit reached). Please try again in a moment.", "N/A"
     except Exception as e:
         print(f"AI Error: {e}")
         return "AI analysis temporarily unavailable. Please try again.", "N/A"
@@ -984,7 +986,8 @@ def home():
         </style>
         <script>
             function updateTimeline(value) {{
-                document.getElementById('timeline-value').textContent = value;
+                const daysText = '{t['days']}';
+                document.getElementById('timeline-value').textContent = value + ' ' + daysText;
                 const form = document.getElementById('timeline-form');
                 form.submit();
             }}
@@ -1089,17 +1092,6 @@ def home():
                     </form>
                 </div>
             </div>
-            
-            <div class="timeline-control">
-                <label for="timeline">{t['timeline']}: <span id="timeline-value" class="timeline-value">{days} {t['days']}</span></label>
-                <form id="timeline-form" method="get">
-                    <input type="range" id="timeline" name="days" min="7" max="365" value="{days}" 
-                           oninput="updateTimeline(this.value)">
-                    <input type="hidden" name="coin" value="{symbol}">
-                    <input type="hidden" name="interpretation_level" value="{interpretation_level}">
-                    <input type="hidden" name="lang" value="{lang}">
-                </form>
-            </div>
 
             <div class="subscription-card">
                 <h3>⭐ {t['subscribe']}</h3>
@@ -1155,6 +1147,17 @@ def home():
                 <div id="answer-box" class="answer-box">
                     <div id="answer-text"></div>
                 </div>
+            </div>
+
+            <div class="timeline-control">
+                <label for="timeline">{t['timeline']}: <span id="timeline-value" class="timeline-value">{days} {t['days']}</span></label>
+                <form id="timeline-form" method="get">
+                    <input type="range" id="timeline" name="days" min="7" max="365" value="{days}" 
+                           oninput="updateTimeline(this.value)">
+                    <input type="hidden" name="coin" value="{symbol}">
+                    <input type="hidden" name="interpretation_level" value="{interpretation_level}">
+                    <input type="hidden" name="lang" value="{lang}">
+                </form>
             </div>
 
             <div class="chart-container">
@@ -1265,8 +1268,10 @@ IMPORTANT: This is educational only. Avoid trading recommendations. Do not use "
             "question": question
         })
         
-    except anthropic.TimeoutError:
+    except anthropic.APITimeoutError:
         return jsonify({"error": "Request timed out. Please try again."}), 504
+    except anthropic.RateLimitError:
+        return jsonify({"error": "Rate limit reached. Please wait a moment and try again."}), 429
     except Exception as e:
         print(f"Ask AI Error: {e}")
         return jsonify({"error": "Failed to process question. Please try again."}), 500
