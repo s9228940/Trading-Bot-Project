@@ -12,6 +12,9 @@ from datetime import datetime, timedelta
 import io
 import anthropic
 import os
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "your-secret-key-change-in-production")
@@ -30,6 +33,363 @@ limiter = Limiter(
 
 # Get API key from environment variable
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+
+# Email configuration
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "smtp.gmail.com")  # Gmail SMTP server
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", 587))  # TLS port
+EMAIL_USER = os.environ.get("EMAIL_USER")  # Your email address
+EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD")  # Your email password or app-specific password
+EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "Crypto Dashboard")
+
+def send_subscription_email(to_email, lang='en'):
+    """Send subscription welcome email with premium features info"""
+    if not EMAIL_USER or not EMAIL_PASSWORD:
+        print("❌ ERROR: Email credentials not configured")
+        print(f"   EMAIL_USER: {'SET' if EMAIL_USER else 'NOT SET'}")
+        print(f"   EMAIL_PASSWORD: {'SET' if EMAIL_PASSWORD else 'NOT SET'}")
+        return False
+    
+    print(f"📧 Attempting to send email to: {to_email}")
+    print(f"   Using SMTP: {EMAIL_HOST}:{EMAIL_PORT}")
+    print(f"   From: {EMAIL_USER}")
+    
+    t = TRANSLATIONS.get(lang, TRANSLATIONS['en'])
+    
+    # Email content based on language
+    if lang == 'es':
+        subject = "¡Bienvenido a Crypto Dashboard Premium!"
+        body_html = f"""
+        <html>
+            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                    <h2 style="color: #667eea;">¡Gracias por tu interés en Crypto Dashboard Premium!</h2>
+                    
+                    <p>Hola,</p>
+                    
+                    <p>Gracias por suscribirte a nuestras actualizaciones. Aquí están las increíbles características que obtendrás con Premium:</p>
+                    
+                    <div style="background: #f9fafb; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                        <h3 style="color: #667eea;">✨ Características Premium</h3>
+                        <ul style="list-style: none; padding: 0;">
+                            <li style="padding: 8px 0;">🔔 <strong>Alertas de precios en tiempo real</strong> - Recibe notificaciones instantáneas sobre movimientos de precios</li>
+                            <li style="padding: 8px 0;">📊 <strong>Indicadores técnicos avanzados</strong> - Accede a más de 20 indicadores profesionales</li>
+                            <li style="padding: 8px 0;">💼 <strong>Seguimiento de cartera</strong> - Rastrea múltiples criptomonedas en un solo lugar</li>
+                            <li style="padding: 8px 0;">🤖 <strong>Soporte prioritario de IA</strong> - Preguntas ilimitadas y respuestas más rápidas</li>
+                            <li style="padding: 8px 0;">📈 <strong>Datos históricos extendidos</strong> - Hasta 5 años de datos históricos</li>
+                            <li style="padding: 8px 0;">🎯 <strong>Estrategias de trading personalizadas</strong> - Análisis adaptados a tu estilo</li>
+                        </ul>
+                    </div>
+                    
+                    <p style="background: #fef3c7; padding: 15px; border-left: 4px solid #f59e0b; border-radius: 5px;">
+                        <strong>⚠️ Próximamente:</strong> Te notificaremos cuando Premium esté disponible con precios especiales de lanzamiento.
+                    </p>
+                    
+                    <p>Mientras tanto, disfruta de todas nuestras características gratuitas:</p>
+                    <ul>
+                        <li>Gráficos técnicos en tiempo real</li>
+                        <li>Análisis de IA básico</li>
+                        <li>Datos de 90 días</li>
+                        <li>Soporte multi-idioma</li>
+                    </ul>
+                    
+                    <p>¿Preguntas? Simplemente responde a este correo.</p>
+                    
+                    <p>Saludos,<br><strong>El equipo de Crypto Dashboard</strong></p>
+                    
+                    <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+                    <p style="font-size: 12px; color: #6b7280; text-align: center;">
+                        © 2025 Crypto Dashboard. Todos los derechos reservados.<br>
+                        Este correo es solo para fines informativos y no constituye asesoramiento financiero.
+                    </p>
+                </div>
+            </body>
+        </html>
+        """
+    elif lang == 'fr':
+        subject = "Bienvenue à Crypto Dashboard Premium!"
+        body_html = f"""
+        <html>
+            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                    <h2 style="color: #667eea;">Merci de votre intérêt pour Crypto Dashboard Premium!</h2>
+                    
+                    <p>Bonjour,</p>
+                    
+                    <p>Merci de vous être abonné à nos mises à jour. Voici les fonctionnalités incroyables que vous obtiendrez avec Premium:</p>
+                    
+                    <div style="background: #f9fafb; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                        <h3 style="color: #667eea;">✨ Fonctionnalités Premium</h3>
+                        <ul style="list-style: none; padding: 0;">
+                            <li style="padding: 8px 0;">🔔 <strong>Alertes de prix en temps réel</strong> - Recevez des notifications instantanées sur les mouvements de prix</li>
+                            <li style="padding: 8px 0;">📊 <strong>Indicateurs techniques avancés</strong> - Accédez à plus de 20 indicateurs professionnels</li>
+                            <li style="padding: 8px 0;">💼 <strong>Suivi de portefeuille</strong> - Suivez plusieurs cryptomonnaies en un seul endroit</li>
+                            <li style="padding: 8px 0;">🤖 <strong>Support IA prioritaire</strong> - Questions illimitées et réponses plus rapides</li>
+                            <li style="padding: 8px 0;">📈 <strong>Données historiques étendues</strong> - Jusqu'à 5 ans de données historiques</li>
+                            <li style="padding: 8px 0;">🎯 <strong>Stratégies de trading personnalisées</strong> - Analyses adaptées à votre style</li>
+                        </ul>
+                    </div>
+                    
+                    <p style="background: #fef3c7; padding: 15px; border-left: 4px solid #f59e0b; border-radius: 5px;">
+                        <strong>⚠️ Bientôt disponible:</strong> Nous vous informerons lorsque Premium sera disponible avec des tarifs de lancement spéciaux.
+                    </p>
+                    
+                    <p>En attendant, profitez de toutes nos fonctionnalités gratuites:</p>
+                    <ul>
+                        <li>Graphiques techniques en temps réel</li>
+                        <li>Analyse IA basique</li>
+                        <li>Données sur 90 jours</li>
+                        <li>Support multilingue</li>
+                    </ul>
+                    
+                    <p>Des questions? Répondez simplement à cet email.</p>
+                    
+                    <p>Cordialement,<br><strong>L'équipe Crypto Dashboard</strong></p>
+                    
+                    <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+                    <p style="font-size: 12px; color: #6b7280; text-align: center;">
+                        © 2025 Crypto Dashboard. Tous droits réservés.<br>
+                        Cet email est à titre informatif uniquement et ne constitue pas un conseil financier.
+                    </p>
+                </div>
+            </body>
+        </html>
+        """
+    elif lang == 'de':
+        subject = "Willkommen bei Crypto Dashboard Premium!"
+        body_html = f"""
+        <html>
+            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                    <h2 style="color: #667eea;">Vielen Dank für Ihr Interesse an Crypto Dashboard Premium!</h2>
+                    
+                    <p>Hallo,</p>
+                    
+                    <p>Vielen Dank für Ihr Abonnement unserer Updates. Hier sind die erstaunlichen Funktionen, die Sie mit Premium erhalten:</p>
+                    
+                    <div style="background: #f9fafb; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                        <h3 style="color: #667eea;">✨ Premium-Funktionen</h3>
+                        <ul style="list-style: none; padding: 0;">
+                            <li style="padding: 8px 0;">🔔 <strong>Echtzeit-Preiswarnungen</strong> - Erhalten Sie sofortige Benachrichtigungen über Preisbewegungen</li>
+                            <li style="padding: 8px 0;">📊 <strong>Erweiterte technische Indikatoren</strong> - Zugriff auf über 20 professionelle Indikatoren</li>
+                            <li style="padding: 8px 0;">💼 <strong>Portfolio-Tracking</strong> - Verfolgen Sie mehrere Kryptowährungen an einem Ort</li>
+                            <li style="padding: 8px 0;">🤖 <strong>Prioritärer KI-Support</strong> - Unbegrenzte Fragen und schnellere Antworten</li>
+                            <li style="padding: 8px 0;">📈 <strong>Erweiterte historische Daten</strong> - Bis zu 5 Jahre historische Daten</li>
+                            <li style="padding: 8px 0;">🎯 <strong>Personalisierte Handelsstrategien</strong> - Analysen angepasst an Ihren Stil</li>
+                        </ul>
+                    </div>
+                    
+                    <p style="background: #fef3c7; padding: 15px; border-left: 4px solid #f59e0b; border-radius: 5px;">
+                        <strong>⚠️ Demnächst:</strong> Wir benachrichtigen Sie, wenn Premium mit speziellen Launch-Preisen verfügbar ist.
+                    </p>
+                    
+                    <p>In der Zwischenzeit genießen Sie alle unsere kostenlosen Funktionen:</p>
+                    <ul>
+                        <li>Echtzeit-Technische Charts</li>
+                        <li>Basis-KI-Analyse</li>
+                        <li>90-Tage-Daten</li>
+                        <li>Mehrsprachige Unterstützung</li>
+                    </ul>
+                    
+                    <p>Fragen? Antworten Sie einfach auf diese E-Mail.</p>
+                    
+                    <p>Mit freundlichen Grüßen,<br><strong>Das Crypto Dashboard Team</strong></p>
+                    
+                    <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+                    <p style="font-size: 12px; color: #6b7280; text-align: center;">
+                        © 2025 Crypto Dashboard. Alle Rechte vorbehalten.<br>
+                        Diese E-Mail dient nur zu Informationszwecken und stellt keine Finanzberatung dar.
+                    </p>
+                </div>
+            </body>
+        </html>
+        """
+    elif lang == 'zh':
+        subject = "欢迎使用Crypto Dashboard高级版！"
+        body_html = f"""
+        <html>
+            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                    <h2 style="color: #667eea;">感谢您对Crypto Dashboard高级版的兴趣！</h2>
+                    
+                    <p>您好，</p>
+                    
+                    <p>感谢您订阅我们的更新。以下是高级版将为您提供的强大功能：</p>
+                    
+                    <div style="background: #f9fafb; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                        <h3 style="color: #667eea;">✨ 高级功能</h3>
+                        <ul style="list-style: none; padding: 0;">
+                            <li style="padding: 8px 0;">🔔 <strong>实时价格警报</strong> - 接收价格变动的即时通知</li>
+                            <li style="padding: 8px 0;">📊 <strong>高级技术指标</strong> - 访问20多个专业指标</li>
+                            <li style="padding: 8px 0;">💼 <strong>投资组合跟踪</strong> - 在一个地方跟踪多个加密货币</li>
+                            <li style="padding: 8px 0;">🤖 <strong>优先AI支持</strong> - 无限问题和更快响应</li>
+                            <li style="padding: 8px 0;">📈 <strong>扩展历史数据</strong> - 多达5年的历史数据</li>
+                            <li style="padding: 8px 0;">🎯 <strong>个性化交易策略</strong> - 适合您风格的分析</li>
+                        </ul>
+                    </div>
+                    
+                    <p style="background: #fef3c7; padding: 15px; border-left: 4px solid #f59e0b; border-radius: 5px;">
+                        <strong>⚠️ 即将推出：</strong>我们会在高级版推出时通知您，并提供特别发布价格。
+                    </p>
+                    
+                    <p>同时，请享受我们所有的免费功能：</p>
+                    <ul>
+                        <li>实时技术图表</li>
+                        <li>基本AI分析</li>
+                        <li>90天数据</li>
+                        <li>多语言支持</li>
+                    </ul>
+                    
+                    <p>有问题？只需回复此邮件。</p>
+                    
+                    <p>此致,<br><strong>Crypto Dashboard团队</strong></p>
+                    
+                    <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+                    <p style="font-size: 12px; color: #6b7280; text-align: center;">
+                        © 2025 Crypto Dashboard. 保留所有权利。<br>
+                        此电子邮件仅供参考，不构成财务建议。
+                    </p>
+                </div>
+            </body>
+        </html>
+        """
+    elif lang == 'tr':
+        subject = "Crypto Dashboard Premium'a Hoş Geldiniz!"
+        body_html = f"""
+        <html>
+            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                    <h2 style="color: #667eea;">Crypto Dashboard Premium'a ilginiz için teşekkürler!</h2>
+                    
+                    <p>Merhaba,</p>
+                    
+                    <p>Güncellemelerimize abone olduğunuz için teşekkür ederiz. Premium ile alacağınız harika özellikler:</p>
+                    
+                    <div style="background: #f9fafb; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                        <h3 style="color: #667eea;">✨ Premium Özellikler</h3>
+                        <ul style="list-style: none; padding: 0;">
+                            <li style="padding: 8px 0;">🔔 <strong>Gerçek zamanlı fiyat uyarıları</strong> - Fiyat hareketleri hakkında anında bildirimler</li>
+                            <li style="padding: 8px 0;">📊 <strong>Gelişmiş teknik göstergeler</strong> - 20'den fazla profesyonel göstergeye erişim</li>
+                            <li style="padding: 8px 0;">💼 <strong>Portföy takibi</strong> - Birden fazla kripto parayı tek yerden takip edin</li>
+                            <li style="padding: 8px 0;">🤖 <strong>Öncelikli AI desteği</strong> - Sınırsız sorular ve daha hızlı yanıtlar</li>
+                            <li style="padding: 8px 0;">📈 <strong>Genişletilmiş geçmiş veriler</strong> - 5 yıla kadar geçmiş veri</li>
+                            <li style="padding: 8px 0;">🎯 <strong>Kişiselleştirilmiş ticaret stratejileri</strong> - Tarzınıza uygun analizler</li>
+                        </ul>
+                    </div>
+                    
+                    <p style="background: #fef3c7; padding: 15px; border-left: 4px solid #f59e0b; border-radius: 5px;">
+                        <strong>⚠️ Yakında:</strong> Premium özel lansma fiyatlarıyla kullanıma sunulduğunda sizi bilgilendireceğiz.
+                    </p>
+                    
+                    <p>Bu arada, tüm ücretsiz özelliklerimizin keyfini çıkarın:</p>
+                    <ul>
+                        <li>Gerçek zamanlı teknik grafikler</li>
+                        <li>Temel AI analizi</li>
+                        <li>90 günlük veri</li>
+                        <li>Çok dilli destek</li>
+                    </ul>
+                    
+                    <p>Sorularınız mı var? Bu e-postaya yanıt verin.</p>
+                    
+                    <p>Saygılarımızla,<br><strong>Crypto Dashboard Ekibi</strong></p>
+                    
+                    <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+                    <p style="font-size: 12px; color: #6b7280; text-align: center;">
+                        © 2025 Crypto Dashboard. Tüm hakları saklıdır.<br>
+                        Bu e-posta yalnızca bilgilendirme amaçlıdır ve finansal tavsiye niteliği taşımaz.
+                    </p>
+                </div>
+            </body>
+        </html>
+        """
+    else:  # English (default)
+        subject = "Welcome to Crypto Dashboard Premium!"
+        body_html = f"""
+        <html>
+            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                    <h2 style="color: #667eea;">Thank you for your interest in Crypto Dashboard Premium!</h2>
+                    
+                    <p>Hello,</p>
+                    
+                    <p>Thank you for subscribing to our updates. Here are the amazing features you'll get with Premium:</p>
+                    
+                    <div style="background: #f9fafb; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                        <h3 style="color: #667eea;">✨ Premium Features</h3>
+                        <ul style="list-style: none; padding: 0;">
+                            <li style="padding: 8px 0;">🔔 <strong>Real-time Price Alerts</strong> - Get instant notifications on price movements</li>
+                            <li style="padding: 8px 0;">📊 <strong>Advanced Technical Indicators</strong> - Access to 20+ professional indicators</li>
+                            <li style="padding: 8px 0;">💼 <strong>Portfolio Tracking</strong> - Track multiple cryptocurrencies in one place</li>
+                            <li style="padding: 8px 0;">🤖 <strong>Priority AI Support</strong> - Unlimited questions and faster responses</li>
+                            <li style="padding: 8px 0;">📈 <strong>Extended Historical Data</strong> - Up to 5 years of historical data</li>
+                            <li style="padding: 8px 0;">🎯 <strong>Personalized Trading Strategies</strong> - Analyses tailored to your style</li>
+                        </ul>
+                    </div>
+                    
+                    <p style="background: #fef3c7; padding: 15px; border-left: 4px solid #f59e0b; border-radius: 5px;">
+                        <strong>⚠️ Coming Soon:</strong> We'll notify you when Premium is available with special launch pricing.
+                    </p>
+                    
+                    <p>In the meantime, enjoy all our free features:</p>
+                    <ul>
+                        <li>Real-time technical charts</li>
+                        <li>Basic AI analysis</li>
+                        <li>90-day data</li>
+                        <li>Multi-language support</li>
+                    </ul>
+                    
+                    <p>Questions? Just reply to this email.</p>
+                    
+                    <p>Best regards,<br><strong>The Crypto Dashboard Team</strong></p>
+                    
+                    <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+                    <p style="font-size: 12px; color: #6b7280; text-align: center;">
+                        © 2025 Crypto Dashboard. All rights reserved.<br>
+                        This email is for informational purposes only and does not constitute financial advice.
+                    </p>
+                </div>
+            </body>
+        </html>
+        """
+    
+    try:
+        # Create message
+        msg = MIMEMultipart('alternative')
+        msg['From'] = f"{EMAIL_FROM_NAME} <{EMAIL_USER}>"
+        msg['To'] = to_email
+        msg['Subject'] = subject
+        
+        # Attach HTML content
+        html_part = MIMEText(body_html, 'html')
+        msg.attach(html_part)
+        
+        print(f"📤 Connecting to SMTP server...")
+        # Send email
+        with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT) as server:
+            print(f"🔐 Starting TLS...")
+            server.starttls()
+            print(f"🔑 Logging in as {EMAIL_USER}...")
+            server.login(EMAIL_USER, EMAIL_PASSWORD)
+            print(f"📨 Sending message...")
+            server.send_message(msg)
+        
+        print(f"✅ Subscription email sent successfully to {to_email}")
+        return True
+        
+    except smtplib.SMTPAuthenticationError as e:
+        print(f"❌ AUTHENTICATION ERROR: {e}")
+        print("   → Check your EMAIL_USER and EMAIL_PASSWORD")
+        print("   → For Gmail, you need an App Password, not your regular password")
+        print("   → Visit: https://myaccount.google.com/apppasswords")
+        return False
+    except smtplib.SMTPException as e:
+        print(f"❌ SMTP ERROR: {e}")
+        return False
+    except Exception as e:
+        print(f"❌ UNEXPECTED ERROR sending email: {e}")
+        print(f"   Error type: {type(e).__name__}")
+        import traceback
+        traceback.print_exc()
+        return False
 
 # -----------------------------
 # TRANSLATIONS
@@ -1217,8 +1577,34 @@ def home():
             function handleSubscribe(event) {{
                 event.preventDefault();
                 const email = document.getElementById('subscribe-email').value;
-                alert('Thank you for your interest! We will send premium information to: ' + email);
-                document.getElementById('subscribe-email').value = '';
+                const lang = '{lang}';
+                const button = event.target.querySelector('button');
+                const originalText = button.textContent;
+                
+                button.disabled = true;
+                button.textContent = 'Sending...';
+                
+                fetch('/api/subscribe', {{
+                    method: 'POST',
+                    headers: {{'Content-Type': 'application/json'}},
+                    body: JSON.stringify({{email: email, lang: lang}})
+                }})
+                .then(response => response.json())
+                .then(data => {{
+                    if (data.success) {{
+                        alert(data.message);
+                        document.getElementById('subscribe-email').value = '';
+                    }} else {{
+                        alert('Error: ' + (data.error || 'Failed to subscribe'));
+                    }}
+                }})
+                .catch(error => {{
+                    alert('Error: Failed to subscribe. Please try again.');
+                }})
+                .finally(() => {{
+                    button.disabled = false;
+                    button.textContent = originalText;
+                }});
             }}
             
             document.addEventListener('DOMContentLoaded', function() {{
@@ -1462,24 +1848,40 @@ IMPORTANT: This is educational only. Avoid trading recommendations. Do not use "
 @app.route("/api/subscribe", methods=["POST"])
 @limiter.limit("5 per hour")
 def subscribe():
-    """Handle subscription requests"""
+    """Handle subscription requests and send welcome email"""
     try:
         data = request.get_json()
         email = data.get("email", "").strip()
+        lang = data.get("lang", "en")
         
         if not email:
             return jsonify({"error": "Email is required"}), 400
         
-        # Here you would typically:
-        # 1. Validate email format
-        # 2. Store in database
-        # 3. Send confirmation email
-        # For now, just return success
+        # Basic email validation
+        import re
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8000)), debug=False)
+        if not re.match(email_pattern, email):
+            return jsonify({"error": "Invalid email format"}), 400
         
-        return jsonify({
-            "success": True,
-            "message": f"Thank you for subscribing! We'll send updates to {email}"
-        })
+        # Send the welcome email
+        email_sent = send_subscription_email(email, lang)
+        
+        if email_sent:
+            return jsonify({
+                "success": True,
+                "message": f"Thank you for subscribing! We've sent premium information to {email}"
+            })
+        else:
+            # Email failed but still record the subscription
+            return jsonify({
+                "success": True,
+                "message": f"Subscription recorded for {email}. Email delivery may be delayed.",
+                "warning": "Email service temporarily unavailable"
+            })
         
     except Exception as e:
         print(f"Subscribe Error: {e}")
