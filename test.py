@@ -1860,10 +1860,7 @@ def subscribe():
         # Basic email validation
         import re
         email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8000)), debug=False)
+        
         if not re.match(email_pattern, email):
             return jsonify({"error": "Invalid email format"}), 400
         
@@ -1882,7 +1879,7 @@ if __name__ == "__main__":
                 "message": f"Subscription recorded for {email}. Email delivery may be delayed.",
                 "warning": "Email service temporarily unavailable"
             })
-        
+            
     except Exception as e:
         print(f"Subscribe Error: {e}")
         return jsonify({"error": "Failed to process subscription"}), 500
