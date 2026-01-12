@@ -12,9 +12,8 @@ from datetime import datetime, timedelta
 import io
 import anthropic
 import os
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+from sendgrid import SendGridAPIClient
+from sendgrid.helpers.mail import Mail
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "your-secret-key-change-in-production")
@@ -34,24 +33,21 @@ limiter = Limiter(
 # Get API key from environment variable
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 
-# Email configuration
-EMAIL_HOST = os.environ.get("EMAIL_HOST", "smtp.gmail.com")  # Gmail SMTP server
-EMAIL_PORT = int(os.environ.get("EMAIL_PORT", 587))  # TLS port
-EMAIL_USER = os.environ.get("EMAIL_USER")  # Your email address
-EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD")  # Your email password or app-specific password
+# SendGrid configuration
+SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY")
+EMAIL_FROM = os.environ.get("EMAIL_FROM", "noreply@trading-bot-project-1-h7mi.onrender.com")
 EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "Crypto Dashboard")
 
 def send_subscription_email(to_email, lang='en'):
-    """Send subscription welcome email with premium features info"""
-    if not EMAIL_USER or not EMAIL_PASSWORD:
-        print("❌ ERROR: Email credentials not configured")
-        print(f"   EMAIL_USER: {'SET' if EMAIL_USER else 'NOT SET'}")
-        print(f"   EMAIL_PASSWORD: {'SET' if EMAIL_PASSWORD else 'NOT SET'}")
+    """Send subscription welcome email with premium features info using SendGrid"""
+    if not SENDGRID_API_KEY:
+        print("❌ ERROR: SendGrid API key not configured")
+        print(f"   SENDGRID_API_KEY: {'SET' if SENDGRID_API_KEY else 'NOT SET'}")
         return False
     
     print(f"📧 Attempting to send email to: {to_email}")
-    print(f"   Using SMTP: {EMAIL_HOST}:{EMAIL_PORT}")
-    print(f"   From: {EMAIL_USER}")
+    print(f"   Using SendGrid API")
+    print(f"   From: {EMAIL_FROM}")
     
     t = TRANSLATIONS.get(lang, TRANSLATIONS['en'])
     
@@ -352,41 +348,30 @@ def send_subscription_email(to_email, lang='en'):
         """
     
     try:
-        # Create message
-        msg = MIMEMultipart('alternative')
-        msg['From'] = f"{EMAIL_FROM_NAME} <{EMAIL_USER}>"
-        msg['To'] = to_email
-        msg['Subject'] = subject
+        # Create SendGrid message
+        message = Mail(
+            from_email=f"{EMAIL_FROM_NAME} <{EMAIL_FROM}>",
+            to_emails=to_email,
+            subject=subject,
+            html_content=body_html
+        )
         
-        # Attach HTML content
-        html_part = MIMEText(body_html, 'html')
-        msg.attach(html_part)
+        print(f"📤 Sending via SendGrid API...")
+        # Send email using SendGrid
+        sg = SendGridAPIClient(SENDGRID_API_KEY)
+        response = sg.send(message)
         
-        print(f"📤 Connecting to SMTP server...")
-        # Send email
-        with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT) as server:
-            print(f"🔐 Starting TLS...")
-            server.starttls()
-            print(f"🔑 Logging in as {EMAIL_USER}...")
-            server.login(EMAIL_USER, EMAIL_PASSWORD)
-            print(f"📨 Sending message...")
-            server.send_message(msg)
+        print(f"✅ Email sent successfully!")
+        print(f"   Status Code: {response.status_code}")
+        print(f"   Response: {response.body}")
         
-        print(f"✅ Subscription email sent successfully to {to_email}")
         return True
         
-    except smtplib.SMTPAuthenticationError as e:
-        print(f"❌ AUTHENTICATION ERROR: {e}")
-        print("   → Check your EMAIL_USER and EMAIL_PASSWORD")
-        print("   → For Gmail, you need an App Password, not your regular password")
-        print("   → Visit: https://myaccount.google.com/apppasswords")
-        return False
-    except smtplib.SMTPException as e:
-        print(f"❌ SMTP ERROR: {e}")
-        return False
     except Exception as e:
-        print(f"❌ UNEXPECTED ERROR sending email: {e}")
+        print(f"❌ SendGrid ERROR: {e}")
         print(f"   Error type: {type(e).__name__}")
+        if hasattr(e, 'body'):
+            print(f"   Error body: {e.body}")
         import traceback
         traceback.print_exc()
         return False
@@ -1859,8 +1844,11 @@ def subscribe():
         
         # Basic email validation
         import re
-        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-        
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8000)), debug=False)
         if not re.match(email_pattern, email):
             return jsonify({"error": "Invalid email format"}), 400
         
@@ -1879,7 +1867,7 @@ def subscribe():
                 "message": f"Subscription recorded for {email}. Email delivery may be delayed.",
                 "warning": "Email service temporarily unavailable"
             })
-            
+        
     except Exception as e:
         print(f"Subscribe Error: {e}")
         return jsonify({"error": "Failed to process subscription"}), 500
