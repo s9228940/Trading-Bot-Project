@@ -1,7 +1,10 @@
-from flask import Flask, send_file, request, jsonify, session
+from flask import Flask, send_file, request, jsonify, session, redirect, url_for, render_template_string
+from flask_limiter.util import get_remote_address
+from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from flask_sqlalchemy import SQLAlchemy
+from werkzeug.security import generate_password_hash, check_password_hash
 from flask_caching import Cache
 from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -22,6 +25,20 @@ app.secret_key = os.environ.get("SECRET_KEY", "your-secret-key-change-in-product
 app.config['CACHE_TYPE'] = 'simple'
 app.config['CACHE_DEFAULT_TIMEOUT'] = 300
 cache = Cache(app)
+
+# Database configuration
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///cryptodash.db')
+# Fix for PostgreSQL URL
+if app.config['SQLALCHEMY_DATABASE_URI'].startswith('postgres://'):
+    app.config['SQLALCHEMY_DATABASE_URI'] = app.config['SQLALCHEMY_DATABASE_URI'].replace('postgres://', 'postgresql://', 1)
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+db = SQLAlchemy(app)
+
+# Flask-Login configuration
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
 
 # Configure rate limiting
 limiter = Limiter(
@@ -579,6 +596,58 @@ TRANSLATIONS = {
         'answer': 'Cevap:',
     }
 }
+
+# -----------------------------
+# DATABASE MODELS
+# -----------------------------
+class User(UserMixin, db.Model):
+    __tablename__ = 'users'
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password_hash = db.Column(db.String(255), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # User preferences
+    preferred_language = db.Column(db.String(10), default='en')
+    preferred_analysis_level = db.Column(db.String(20), default='advanced')
+    is_premium = db.Column(db.Boolean, default=False)
+    
+    # Relationships
+    watchlist = db.relationship('Watchlist', backref='user', lazy=True, cascade='all, delete-orphan')
+    
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+    
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+
+
+class Watchlist(db.Model):
+    __tablename__ = 'watchlist'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    symbol = db.Column(db.String(10), nullable=False)
+    added_at = db.Column(db.DateTime, default=datetime.utcnow)
+    notes = db.Column(db.Text)
+
+
+class Subscription(db.Model):
+    __tablename__ = 'subscriptions'
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(120), nullable=False)
+    language = db.Column(db.String(10), default='en')
+    subscribed_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+# User loader for Flask-Login
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
+
+
+# Create database tables
+with app.app_context():
+    db.create_all()
 
 # -----------------------------
 # SUPPORTED COINS
@@ -1848,6 +1917,13 @@ def subscribe():
         if not re.match(email_pattern, email):
             return jsonify({"error": "Invalid email format"}), 400
         
+        # Save to database
+        existing = Subscription.query.filter_by(email=email).first()
+        if not existing:
+            sub = Subscription(email=email, language=lang)
+            db.session.add(sub)
+            db.session.commit()
+        
         # Send the welcome email
         email_sent = send_subscription_email(email, lang)
         
@@ -1867,6 +1943,322 @@ def subscribe():
         print(f"Subscribe Error: {e}")
         return jsonify({"error": "Failed to process subscription"}), 500
 
+# -----------------------------
+# AUTHENTICATION ROUTES
+# -----------------------------
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if current_user.is_authenticated:
+        return redirect(url_for('home'))
+    
+    error = None
+    if request.method == 'POST':
+        email = request.form.get('email', '').strip()
+        password = request.form.get('password', '')
+        
+        user = User.query.filter_by(email=email).first()
+        
+        if user and user.check_password(password):
+            login_user(user)
+            return redirect(url_for('home'))
+        
+        error = 'Invalid email or password'
+    
+    return render_template_string(LOGIN_TEMPLATE, error=error)
+
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if current_user.is_authenticated:
+        return redirect(url_for('home'))
+    
+    error = None
+    if request.method == 'POST':
+        email = request.form.get('email', '').strip()
+        password = request.form.get('password', '')
+        confirm_password = request.form.get('confirm_password', '')
+        
+        if not email or not password:
+            error = 'Email and password required'
+        elif password != confirm_password:
+            error = 'Passwords do not match'
+        elif len(password) < 6:
+            error = 'Password must be at least 6 characters'
+        elif User.query.filter_by(email=email).first():
+            error = 'Email already registered'
+        else:
+            user = User(email=email)
+            user.set_password(password)
+            db.session.add(user)
+            db.session.commit()
+            login_user(user)
+            return redirect(url_for('home'))
+    
+    return render_template_string(REGISTER_TEMPLATE, error=error)
+
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for('login'))
+
+
+# -----------------------------
+# WATCHLIST API
+# -----------------------------
+@app.route('/api/watchlist', methods=['GET'])
+@login_required
+def get_watchlist():
+    watchlist_items = Watchlist.query.filter_by(user_id=current_user.id).all()
+    return jsonify({
+        'watchlist': [{
+            'id': item.id,
+            'symbol': item.symbol,
+            'coin_name': COINS.get(item.symbol, item.symbol),
+            'added_at': item.added_at.isoformat(),
+            'notes': item.notes
+        } for item in watchlist_items]
+    })
+
+
+@app.route('/api/watchlist/add', methods=['POST'])
+@login_required
+def add_to_watchlist():
+    data = request.get_json()
+    symbol = data.get('symbol', '').upper()
+    notes = data.get('notes', '')
+    
+    if symbol not in COINS:
+        return jsonify({'error': 'Invalid symbol'}), 400
+    
+    existing = Watchlist.query.filter_by(user_id=current_user.id, symbol=symbol).first()
+    if existing:
+        return jsonify({'error': 'Already in watchlist'}), 400
+    
+    watchlist_item = Watchlist(user_id=current_user.id, symbol=symbol, notes=notes)
+    db.session.add(watchlist_item)
+    db.session.commit()
+    
+    return jsonify({'success': True, 'message': f'{COINS[symbol]} added to watchlist'})
+
+
+@app.route('/api/watchlist/remove/<int:item_id>', methods=['DELETE'])
+@login_required
+def remove_from_watchlist(item_id):
+    item = Watchlist.query.filter_by(id=item_id, user_id=current_user.id).first()
+    if not item:
+        return jsonify({'error': 'Item not found'}), 404
+    
+    db.session.delete(item)
+    db.session.commit()
+    
+    return jsonify({'success': True, 'message': 'Removed from watchlist'})
+
+
+# -----------------------------
+# USER SETTINGS API
+# -----------------------------
+@app.route('/api/settings', methods=['GET', 'POST'])
+@login_required
+def user_settings():
+    if request.method == 'POST':
+        data = request.get_json()
+        
+        if 'preferred_language' in data:
+            current_user.preferred_language = data['preferred_language']
+        if 'preferred_analysis_level' in data:
+            current_user.preferred_analysis_level = data['preferred_analysis_level']
+        
+        db.session.commit()
+        return jsonify({'success': True, 'message': 'Settings saved'})
+    
+    return jsonify({
+        'preferred_language': current_user.preferred_language,
+        'preferred_analysis_level': current_user.preferred_analysis_level,
+        'is_premium': current_user.is_premium,
+        'email': current_user.email
+    })
+
+
+# HTML TEMPLATES
+LOGIN_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Login - Crypto Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .auth-container {
+            background: white;
+            padding: 40px;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            width: 100%;
+            max-width: 400px;
+        }
+        h2 { color: #667eea; margin-bottom: 30px; text-align: center; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 8px; font-weight: 600; color: #374151; }
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e5e7eb;
+            border-radius: 10px;
+            font-size: 16px;
+            font-family: inherit;
+        }
+        input:focus { outline: none; border-color: #667eea; }
+        button {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        button:hover { opacity: 0.9; }
+        .error { 
+            background: #fee2e2; 
+            color: #dc2626; 
+            padding: 12px; 
+            border-radius: 8px;
+            margin-bottom: 15px; 
+            text-align: center; 
+        }
+        .link { text-align: center; margin-top: 20px; color: #6b7280; }
+        .link a { color: #667eea; text-decoration: none; font-weight: 600; }
+        .link a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="auth-container">
+        <h2>🔐 Login to Crypto Dashboard</h2>
+        {% if error %}
+        <div class="error">{{ error }}</div>
+        {% endif %}
+        <form method="POST">
+            <div class="form-group">
+                <label>Email Address</label>
+                <input type="email" name="email" required>
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" name="password" required>
+            </div>
+            <button type="submit">Login</button>
+        </form>
+        <div class="link">
+            Don't have an account? <a href="/register">Register here</a>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+REGISTER_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Register - Crypto Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .auth-container {
+            background: white;
+            padding: 40px;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            width: 100%;
+            max-width: 400px;
+        }
+        h2 { color: #667eea; margin-bottom: 30px; text-align: center; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 8px; font-weight: 600; color: #374151; }
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e5e7eb;
+            border-radius: 10px;
+            font-size: 16px;
+            font-family: inherit;
+        }
+        input:focus { outline: none; border-color: #667eea; }
+        button {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        button:hover { opacity: 0.9; }
+        .error { 
+            background: #fee2e2; 
+            color: #dc2626; 
+            padding: 12px; 
+            border-radius: 8px;
+            margin-bottom: 15px; 
+            text-align: center; 
+        }
+        .link { text-align: center; margin-top: 20px; color: #6b7280; }
+        .link a { color: #667eea; text-decoration: none; font-weight: 600; }
+        .link a:hover { text-decoration: underline; }
+        .hint { font-size: 12px; color: #6b7280; margin-top: 4px; }
+    </style>
+</head>
+<body>
+    <div class="auth-container">
+        <h2>📝 Create Account</h2>
+        {% if error %}
+        <div class="error">{{ error }}</div>
+        {% endif %}
+        <form method="POST">
+            <div class="form-group">
+                <label>Email Address</label>
+                <input type="email" name="email" required>
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" name="password" required minlength="6">
+                <div class="hint">At least 6 characters</div>
+            </div>
+            <div class="form-group">
+                <label>Confirm Password</label>
+                <input type="password" name="confirm_password" required minlength="6">
+            </div>
+            <button type="submit">Create Account</button>
+        </form>
+        <div class="link">
+            Already have an account? <a href="/login">Login here</a>
+        </div>
+    </div>
+</body>
+</html>
+"""
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8000)), debug=False)
